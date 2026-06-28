@@ -301,7 +301,8 @@ export default function App() {
           <>
             {tab==="book"&&!profile&&<ProfileSetup onDone={setProfile}/>}
             {tab==="book"&&profile&&<BookForm profile={profile} onProfileReset={()=>setProfile(null)} onSubmit={handleBook} isOccupied={isOccupied} seatsLeft={seatsLeft} rsvList={rsvList} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate}/>}
-            {tab==="list"&&<ReservationList rsvList={rsvList} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
+            {tab==="list"&&profile&&<ReservationList rsvList={rsvList.filter(r=>r.phone===profile.phone)} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
+            {tab==="list"&&!profile&&<ProfileSetup onDone={setProfile}/>}
           </>
         )}
         {mode==="admin"&&(
@@ -1048,7 +1049,7 @@ function ResCard({rsv,onCancel,onEdit,rank,seatsLeft,canCancel}){
         </div>
         {!isDone&&(
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-            {rsv.status!=="waitlist"&&<button style={btn("secondary",true)} onClick={()=>onEdit(rsv)}>変更</button>}
+            {rsv.status!=="waitlist"&&<button style={btn("blue",true)} onClick={()=>onEdit(rsv)}>変更</button>}
             {cancelOk&&(confirm?<button style={btn("danger",true)} onClick={()=>{onCancel(rsv.id);setConfirm(false);}}>本当にキャンセル</button>:<button style={btn("danger",true)} onClick={()=>setConfirm(true)}>キャンセル</button>)}
           </div>
         )}
