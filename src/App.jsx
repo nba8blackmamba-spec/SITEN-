@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, onSnapshot, setDoc, query, orderBy } from "firebase/firestore";
 
+const SITEN_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAflBMVEX88QMPYaoAAAD+/AKko1QFY7DepyoOYq777gZhZnL76gdLdZcOYq5zkWuRdFf8swkAf3+yoTkAAP9piIwAP78AefAANn/EkEG0tAC6xTy2xEkA///Dxkf3eBzedU85Xn8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1YsZFAAAAIHRSTlP+/gAK/w3+XGP+nf+k//8OAv4B/wQFA/8D//8B/woP/3UTSsEAAAPaSURBVHjatZrZlpswDIZlbEiwIZAwWWc6ff+3rA1JMHiVUnTRTjvn6LN+yQuWoYhbD9z8xfd7KeFtUu730/9znnAA0d+W5ejccm2bHCEJRgxgvJcQtyeDAtDu+13DxMqjEL44wggIuy93jLG6WvlTrT8MjgJ8l5N7xo6zm58xAKXGf9wdRCAICAx/cs9UZY/9oQHDcDd/1k4URXHLBJz08JvJPztYLgalEyK0QcuUcGvKH4QL6N/D17bwowYhKm1CDMpbUUXRpQHW8LVdbQcPcQ1UkhVECqD9M8uWNXR0flibS1gBvpb+5wh+xNCKN64SWi7/xFsTYDX+3cL/nIOWwbAAMN+E8BAg6t+uIl0+s0QilAaHAAt91v7ZstzFO4Do8rQgQNT/cqV4DbuKjN8hQKh+3DISenqJY1VpfZSCXMIbcPb6t5Og2HA0UfzoBYkNUYJVrfBeH7z+rcXo2N6nxc6kWrTxbWLeheCdgMYLcPYDNUCGyWIFKD0J9qRZWy1yAHMaJkDflyxkK4dHyLOXSPAMoAkCnD0tz14iQVyg9Z6AsKdIIyAiED2Ep0gGcIkG8EEI3QsQDcDZFXAhgH8N+i8ijVkAM4lZyg70ECBRQh+JZEKA6Bz4VCQD6Iu0QmSReHGDLIWoIunpDOcchcgicQ55ClFFMkneZQKYINURZCpETIMs4JTtn5QGDmU+gJIGDjsEYHnYzksCDoAXSUKDAeBFwgIYPgsMadXWgHprAHpCowHYSkIDsJWEB7Dj1gCcSAQATiQKADUZSADMZGhIhOvWgOw8S9xyjZ/PZEBuCHvUlkkoJA492zQEjjm2EEKQmIMXZTqbg1e5pUbj8Z1tqJE+/JZbamSO7/2WGnENKM4b1lGR/RFIWy6mj8Ccz1hiEvgE+KKGcEinePoQ/yaGUCdrdAKQQ6hzbowM4BS7zlFkAAeecSHVtlSAfSEVvk5QQAbwzr4UDJWqiAEO8RLtcq41IQYQyesu62L24hfJ3FhTlgpZ3PgS8O2vpPHKmrDYuVfLgcvxO8CDkALP5XggDS2ERapw1/sBgggSamyDwk9Qj6lFhKghGWqxRGLQCJWbYrlsBybaXM/lQjj+gxnQEwAijbrs7e2QmmChVuMl7wwQEqhz2qVOs/Rr0SzFTWLp+ve0e8siLVOoj5nT7tX7zzkVhAgMn//JbLlf4kH4P8R9ww8+Guj716OBTP/yF/VoYMrE2Yv4e/Wqg3z2YDJxMYgmoz73WvmOE56eGMQ63Y5/M3ji05OxwXkyjDkOsX50Ah89nhn3oXJ6pbNrGnv4Ujv/Nb/pbgkH/wDdEDFg1IeT4wAAAABJRU5ErkJggg==";
 // ── 定数 ────────────────────────────────────────────────
 const SEATS = 4;
 const ADMINS = [
@@ -261,7 +262,7 @@ export default function App() {
   if (!dbReady) {
     return (
       <div style={{...F,background:C.bg,minHeight:"100vh",color:C.text,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
-        <div style={{width:34,height:34,background:C.gold,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:C.blue,border:`2px solid ${C.blue}`}}>SI</div>
+        <img src={SITEN_LOGO} alt="SITEN" style={{width:48,height:48,borderRadius:"50%"}}/>
         <div style={{fontSize:13,color:C.muted}}>読み込み中...</div>
       </div>
     );
@@ -271,7 +272,7 @@ export default function App() {
     <div style={{...F,background:C.bg,minHeight:"100vh",color:C.text}}>
       <header style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:34,height:34,background:C.orange,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:C.blue,border:`2px solid ${C.blue}`}}>SI</div>
+          <img src={SITEN_LOGO} alt="SITEN" style={{width:38,height:38,borderRadius:"50%"}}/>
           <div>
             <div style={{fontSize:18,fontWeight:800,color:C.text,letterSpacing:"0.14em"}}>SITEN</div>
             <div style={{fontSize:10,color:C.muted,letterSpacing:"0.14em"}}>MAHJONG SALON</div>
