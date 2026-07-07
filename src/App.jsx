@@ -136,8 +136,20 @@ export default function App() {
 
   const [toast,     setToast]    = useState(null);
   const [editing,   setEditing]  = useState(null);
-  const [adminAuth, setAdminAuth]= useState(false);
-  const [adminName, setAdminName]= useState("");
+  const [adminAuth, setAdminAuthLocal]= useState(()=>{
+    try { return localStorage.getItem("siten_admin_auth")==="true"; } catch { return false; }
+  });
+  const [adminName, setAdminNameLocal]= useState(()=>{
+    try { return localStorage.getItem("siten_admin_name")||""; } catch { return ""; }
+  });
+  const setAdminAuth = (v) => {
+    setAdminAuthLocal(v);
+    try { localStorage.setItem("siten_admin_auth", v?"true":"false"); } catch {}
+  };
+  const setAdminName = (v) => {
+    setAdminNameLocal(v);
+    try { localStorage.setItem("siten_admin_name", v); } catch {}
+  };
 
   const [closedDays,setClosedDaysLocal]= useState([]);
   const [closedWeekdays,setClosedWeekdaysLocal]=useState([]);
@@ -173,6 +185,23 @@ export default function App() {
   };
 
   const flash = (msg,ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),2800); };
+
+  // 0時を過ぎた予約を自動でfinished:trueにする（毎分チェック）
+  useEffect(() => {
+    const autoFinish = () => {
+      const now = new Date();
+      const todayStr = fmt(now);
+      rsvList.forEach(r => {
+        if(r.status === "confirmed" && !r.finished && r.date < todayStr) {
+          setDoc(doc(db, "reservations", r.id), {...r, finished: true})
+            .catch(e => console.error("自動終了エラー:", e));
+        }
+      });
+    };
+    autoFinish();
+    const timer = setInterval(autoFinish, 60000);
+    return () => clearInterval(timer);
+  }, [rsvList]);
 
   const isClosedDate = (date) => {
     if(closedDays.includes(date)) return true;
@@ -256,7 +285,7 @@ export default function App() {
   };
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
-  const activeCount=rsvList.filter(r=>r.status==="confirmed").length;
+  const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
   const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["settings","設定"]];
 
   if (!dbReady) {
@@ -292,6 +321,7 @@ export default function App() {
                 <button key={k} onClick={()=>setAdminTab(k)} style={{padding:"7px 11px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:adminTab===k?C.gold:"transparent",color:adminTab===k?C.white:C.muted}}>{l}</button>
               ))}
               <button onClick={()=>setMode("customer")} style={{padding:"7px 11px",borderRadius:6,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:12,background:"transparent",color:C.muted,marginLeft:4}}>← 客側</button>
+              <button onClick={()=>{setAdminAuth(false);setAdminName("");setMode("customer");}} style={{padding:"7px 11px",borderRadius:6,border:`1px solid ${C.red}55`,cursor:"pointer",fontSize:12,background:"transparent",color:C.red,marginLeft:4}}>ログアウト</button>
             </>
           )}
         </div>
@@ -302,7 +332,7 @@ export default function App() {
           <>
             {tab==="book"&&!profile&&<ProfileSetup onDone={setProfile}/>}
             {tab==="book"&&profile&&<BookForm profile={profile} onProfileReset={()=>setProfile(null)} onSubmit={handleBook} isOccupied={isOccupied} seatsLeft={seatsLeft} rsvList={rsvList} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate}/>}
-            {tab==="list"&&profile&&<ReservationList rsvList={rsvList.filter(r=>r.phone===profile.phone)} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
+            {tab==="list"&&profile&&<ReservationList rsvList={rsvList.filter(r=>r.phone===profile.phone&&!r.finished&&r.date>=fmt(TODAY))} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
             {tab==="list"&&!profile&&<ProfileSetup onDone={setProfile}/>}
           </>
         )}
@@ -329,8 +359,11 @@ export default function App() {
 // 管理エリア ルーター
 // ════════════════════════════════════════════════════════
 function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminName,closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours}){
-  if(tab==="today")    return <AdminToday    rsvList={rsvList} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank} adminName={adminName}/>;
-  if(tab==="list")     return <AdminList     rsvList={rsvList} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank}/>;
+  const todayStr = fmt(TODAY);
+  // 今日以降・かつfinishedでない・cancelledでない予約のみ
+  const activeRsv = rsvList.filter(r=>r.date>=todayStr&&!r.finished&&r.status!=="cancelled");
+  if(tab==="today")    return <AdminToday    rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank} adminName={adminName}/>;
+  if(tab==="list")     return <AdminList     rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank}/>;
   if(tab==="calendar") return <AdminCalendar rsvList={rsvList}/>;
   if(tab==="sales")    return <AdminSales    rsvList={rsvList}/>;
   if(tab==="regulars") return <AdminRegulars rsvList={rsvList}/>;
