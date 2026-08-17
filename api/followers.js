@@ -4,6 +4,16 @@ export default async function handler(req, res) {
   const listRes = await fetch("https://api.line.me/v2/bot/followers/ids", {
     headers: { "Authorization": `Bearer ${token}` }
   });
+
+  if (!listRes.ok) {
+    const errText = await listRes.text();
+    return res.status(500).json({
+      error: "友だち一覧の取得に失敗しました",
+      status: listRes.status,
+      detail: errText
+    });
+  }
+
   const listData = await listRes.json();
   const ids = listData.userIds || [];
 
@@ -20,5 +30,5 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json(profiles);
+  return res.status(200).json({ count: profiles.length, profiles });
 }
