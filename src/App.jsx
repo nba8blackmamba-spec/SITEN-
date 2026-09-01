@@ -246,6 +246,15 @@ export default function App() {
     return updated;
   };
 
+  const notifyOwner = async (msg) => {
+    try {
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "U06ebc959d7d9eea50dc1c3f6254c0fc4", message: msg }),
+      });
+    } catch (e) { console.error("通知エラー:", e); }
+  };
   const handleBook = (rsv) => {
     if(!profile) setProfile({name:rsv.name,phone:rsv.phone});
     if(rsv.repeatWeeks>1){
@@ -262,11 +271,14 @@ export default function App() {
       }
       setRsvList(list);
       flash(`定期予約：確定${createdCount}件${waitCount>0?`／待ち${waitCount}件`:""} ✓`);
+      notifyOwner(`【定期予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n確定: ${createdCount}件／待ち: ${waitCount}件`);
     } else {
       const left=seatsLeft(rsv.tableId,rsv.date,rsv.time);
       const status=left>=rsv.people?"confirmed":"waitlist";
       setRsvList(p=>[{...rsv,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...p]);
       flash(status==="confirmed"?"予約が確定しました ✓":"キャンセル待ちで登録しました");
+      const table=TABLES.find(t=>t.id===rsv.tableId);
+      notifyOwner(`【新規予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n卓: ${table?table.label:"未定"}\nステータス: ${status==="confirmed"?"確定":"キャンセル待ち"}`);
     }
     setTab("list");
   };
