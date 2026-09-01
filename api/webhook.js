@@ -11,6 +11,20 @@ async function getRawBody(req) {
   });
 }
 
+async function fetchLineDisplayName(userId, token) {
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.displayName || null;
+  } catch (e) {
+    console.error("プロフィール取得エラー:", e);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).end("ok");
 
@@ -36,7 +50,15 @@ export default async function handler(req, res) {
     const events = body.events || [];
 
     const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore, doc, setDoc } = await import("firebase/firestore");
+    const {
+      getFirestore,
+      doc,
+      getDoc,
+      setDoc,
+      collection,
+      addDoc,
+      serverTimestamp,
+    } = await import("firebase/firestore");
 
     if (!getApps().length) {
       initializeApp({
@@ -46,21 +68,47 @@ export default async function handler(req, res) {
       });
     }
     const db = getFirestore();
+    const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
     for (const event of events) {
       const userId = event.source?.userId;
       if (!userId) continue;
 
-      await setDoc(
-        doc(db, "lineUsers", userId),
-        {
-          userId,
-          lastEventType: event.type,
-          lastMessage: event.message?.text || null,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+      const userRef = doc(db, "lineUsers", userId);
+      const messageText = event.message?.text || null;
+
+      const update = {
+        userId,
+        lastEventType: event.type,
+        lastMessage: messageText,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (messageText) {
+        update.lastMessageAt = serverTimestamp();
+        update.unread = true;
+      }
+
+      // 表示名がまだ保存されていなければLINEのprofile APIから取得して保存する
+      try {
+        const snap = await getDoc(userRef);
+        if (!snap.exists() || !snap.data().name) {
+          const displayName = await fetchLineDisplayName(userId, lineToken);
+          if (displayName) update.name = displayName;
+        }
+      } catch (e) {
+        console.error("表示名チェックエラー:", e);
+      }
+
+      await setDoc(userRef, update, { merge: true });
+
+      if (messageText) {
+        await addDoc(collection(db, "lineUsers", userId, "messages"), {
+          text: messageText,
+          from: "customer",
+          createdAt: serverTimestamp(),
+        });
+      }
     }
   } catch (e) {
     console.error("記録エラー:", e);

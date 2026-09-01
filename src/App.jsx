@@ -298,7 +298,7 @@ export default function App() {
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
   const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
-  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["settings","設定"]];
+  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["settings","設定"]];
 
   if (!dbReady) {
     return (
@@ -379,6 +379,7 @@ function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminNa
   if(tab==="calendar") return <AdminCalendar rsvList={rsvList}/>;
   if(tab==="sales")    return <AdminSales    rsvList={rsvList}/>;
   if(tab==="regulars") return <AdminRegulars rsvList={rsvList}/>;
+  if(tab==="chat")     return <AdminChat/>;
   if(tab==="settings") return <AdminSettings closedDays={closedDays} setClosedDays={setClosedDays} closedWeekdays={closedWeekdays} setClosedWeekdays={setClosedWeekdays} cancelDeadlineHours={cancelDeadlineHours} setCancelDeadlineHours={setCancelDeadlineHours}/>;
   return null;
 }
@@ -794,6 +795,134 @@ function AdminRegulars({rsvList}){
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── 管理：LINEチャット ───────────────────────────────────
+function AdminChat(){
+  const [users,setUsers]=useState([]);
+  const [selected,setSelected]=useState(null);
+  const [messages,setMessages]=useState([]);
+  const [input,setInput]=useState("");
+  const [sending,setSending]=useState(false);
+  const bottomRef=useRef(null);
+
+  useEffect(()=>{
+    const q=query(collection(db,"lineUsers"),orderBy("lastMessageAt","desc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      setUsers(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },(err)=>console.error("LINEユーザー取得エラー:",err));
+    return ()=>unsub();
+  },[]);
+
+  useEffect(()=>{
+    if(!selected){ setMessages([]); return; }
+    const q=query(collection(db,"lineUsers",selected,"messages"),orderBy("createdAt","asc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      setMessages(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },(err)=>console.error("メッセージ取得エラー:",err));
+    return ()=>unsub();
+  },[selected]);
+
+  useEffect(()=>{
+    bottomRef.current?.scrollIntoView({behavior:"smooth"});
+  },[messages]);
+
+  const selectUser=(u)=>{
+    setSelected(u.id);
+    if(u.unread){
+      setDoc(doc(db,"lineUsers",u.id),{unread:false},{merge:true}).catch(e=>console.error("既読更新エラー:",e));
+    }
+  };
+
+  const send=async()=>{
+    const text=input.trim();
+    if(!text||!selected||sending) return;
+    setSending(true);
+    try{
+      const res=await fetch("/api/chatReply",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({userId:selected,message:text}),
+      });
+      if(!res.ok) throw new Error("送信に失敗しました");
+      setInput("");
+    }catch(e){
+      console.error(e);
+      alert("送信に失敗しました");
+    }finally{
+      setSending(false);
+    }
+  };
+
+  const fmtTime=(ts)=>{
+    if(!ts) return "";
+    const d=ts.toDate?ts.toDate():new Date(ts);
+    if(isNaN(d.getTime())) return "";
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  };
+
+  const selectedUser=users.find(u=>u.id===selected);
+
+  return(
+    <div>
+      <div style={tag}>チャット</div>
+      <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
+        <div style={{flex:"0 0 260px",minWidth:220}}>
+          {users.length===0&&<div style={{...crd,textAlign:"center",color:C.muted}}>まだメッセージがありません</div>}
+          {users.map(u=>(
+            <div key={u.id} onClick={()=>selectUser(u)} style={{...crd,marginBottom:8,padding:12,cursor:"pointer",borderColor:selected===u.id?C.gold:C.border,background:selected===u.id?`${C.gold}10`:C.card}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                <div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name||u.userId}</div>
+                {u.unread&&<span style={bdg("red")}>未読</span>}
+              </div>
+              <div style={{fontSize:12,color:C.muted,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.lastMessage||""}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{fmtTime(u.lastMessageAt)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{flex:1,minWidth:280}}>
+          {!selected?(
+            <div style={{...crd,textAlign:"center",color:C.muted,padding:"40px 0"}}>左の一覧からお客様を選択してください</div>
+          ):(
+            <div style={{...crd,display:"flex",flexDirection:"column",height:520,padding:0,overflow:"hidden"}}>
+              <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontWeight:700,fontSize:14}}>
+                {selectedUser?.name||selected}
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:8}}>
+                {messages.length===0&&<div style={{textAlign:"center",color:C.muted,fontSize:12,marginTop:20}}>メッセージはまだありません</div>}
+                {messages.map(m=>(
+                  <div key={m.id} style={{display:"flex",justifyContent:m.from==="store"?"flex-end":"flex-start"}}>
+                    <div style={{
+                      maxWidth:"70%",padding:"8px 12px",borderRadius:12,fontSize:13,lineHeight:1.5,
+                      background:m.from==="store"?C.gold:C.bg,
+                      color:m.from==="store"?C.white:C.text,
+                      border:m.from==="store"?"none":`1px solid ${C.border}`,
+                      borderBottomRightRadius:m.from==="store"?2:12,
+                      borderBottomLeftRadius:m.from==="store"?12:2,
+                    }}>
+                      <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>
+                      <div style={{fontSize:10,marginTop:4,opacity:0.7,textAlign:"right"}}>{fmtTime(m.createdAt)}</div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={bottomRef}/>
+              </div>
+              <div style={{display:"flex",gap:8,padding:12,borderTop:`1px solid ${C.border}`}}>
+                <input
+                  style={{...inp,flex:1}}
+                  placeholder="メッセージを入力"
+                  value={input}
+                  onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+                />
+                <button style={btn("primary")} onClick={send} disabled={sending||!input.trim()}>送信</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
