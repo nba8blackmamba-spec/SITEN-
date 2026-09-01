@@ -298,7 +298,7 @@ export default function App() {
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
   const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
-  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["settings","設定"]];
+  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
 
   if (!dbReady) {
     return (
@@ -363,6 +363,7 @@ export default function App() {
 
       {editing&&<EditModal rsv={editing} isOccupied={isOccupied} seatsLeft={seatsLeft} onSave={handleUpdate} onClose={()=>setEditing(null)}/>}
       {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.ok?C.green:C.red,color:"#fff",padding:"11px 22px",borderRadius:8,fontWeight:700,fontSize:14,zIndex:999,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",whiteSpace:"nowrap"}}>{toast.msg}</div>}
+      {mode==="customer"&&<CustomerSiteChat profile={profile}/>}
     </div>
   );
 }
@@ -380,6 +381,7 @@ function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminNa
   if(tab==="sales")    return <AdminSales    rsvList={rsvList}/>;
   if(tab==="regulars") return <AdminRegulars rsvList={rsvList}/>;
   if(tab==="chat")     return <AdminChat/>;
+  if(tab==="sitechat") return <AdminSiteChat/>;
   if(tab==="settings") return <AdminSettings closedDays={closedDays} setClosedDays={setClosedDays} closedWeekdays={closedWeekdays} setClosedWeekdays={setClosedWeekdays} cancelDeadlineHours={cancelDeadlineHours} setCancelDeadlineHours={setCancelDeadlineHours}/>;
   return null;
 }
@@ -928,6 +930,136 @@ function AdminChat(){
   );
 }
 
+// ── 管理：サイトチャット ─────────────────────────────────
+function AdminSiteChat(){
+  const [chats,setChats]=useState([]);
+  const [selected,setSelected]=useState(null);
+  const [messages,setMessages]=useState([]);
+  const [input,setInput]=useState("");
+  const [sending,setSending]=useState(false);
+  const bottomRef=useRef(null);
+
+  useEffect(()=>{
+    const q=query(collection(db,"siteChats"),orderBy("lastMessageAt","desc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      setChats(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },(err)=>console.error("サイトチャット一覧取得エラー:",err));
+    return ()=>unsub();
+  },[]);
+
+  useEffect(()=>{
+    if(!selected){ setMessages([]); return; }
+    const q=query(collection(db,"siteChats",selected,"messages"),orderBy("createdAt","asc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      setMessages(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },(err)=>console.error("サイトチャットメッセージ取得エラー:",err));
+    return ()=>unsub();
+  },[selected]);
+
+  useEffect(()=>{
+    bottomRef.current?.scrollIntoView({behavior:"smooth"});
+  },[messages]);
+
+  const selectChat=(c)=>{
+    setSelected(c.id);
+    if(c.unreadByStore){
+      setDoc(doc(db,"siteChats",c.id),{unreadByStore:false},{merge:true}).catch(e=>console.error("既読更新エラー:",e));
+    }
+  };
+
+  const send=async()=>{
+    const text=input.trim();
+    if(!text||!selected||sending) return;
+    setSending(true);
+    try{
+      const chat=chats.find(c=>c.id===selected);
+      const res=await fetch("/api/siteChatSend",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({phone:selected,name:chat?.name||"",text,from:"store"}),
+      });
+      if(!res.ok) throw new Error("送信に失敗しました");
+      setInput("");
+    }catch(e){
+      console.error(e);
+      alert("送信に失敗しました");
+    }finally{
+      setSending(false);
+    }
+  };
+
+  const fmtTime=(ts)=>{
+    if(!ts) return "";
+    const d=ts.toDate?ts.toDate():new Date(ts);
+    if(isNaN(d.getTime())) return "";
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  };
+
+  const selectedChat=chats.find(c=>c.id===selected);
+
+  return(
+    <div>
+      <div style={tag}>サイトチャット</div>
+      <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
+        <div style={{flex:"0 0 260px",minWidth:220}}>
+          {chats.length===0&&<div style={{...crd,textAlign:"center",color:C.muted}}>まだメッセージがありません</div>}
+          {chats.map(c=>(
+            <div key={c.id} onClick={()=>selectChat(c)} style={{...crd,marginBottom:8,padding:12,cursor:"pointer",borderColor:selected===c.id?C.gold:C.border,background:selected===c.id?`${C.gold}10`:C.card}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                <div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"（名前未登録）"}</div>
+                {c.unreadByStore&&<span style={bdg("red")}>未読</span>}
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{c.id}</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.lastMessage||""}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{fmtTime(c.lastMessageAt)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{flex:1,minWidth:280}}>
+          {!selected?(
+            <div style={{...crd,textAlign:"center",color:C.muted,padding:"40px 0"}}>左の一覧からお客様を選択してください</div>
+          ):(
+            <div style={{...crd,display:"flex",flexDirection:"column",height:520,padding:0,overflow:"hidden"}}>
+              <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontWeight:700,fontSize:14}}>
+                {selectedChat?.name||"（名前未登録）"}　<span style={{fontSize:11,color:C.muted,fontWeight:400}}>{selected}</span>
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:8}}>
+                {messages.length===0&&<div style={{textAlign:"center",color:C.muted,fontSize:12,marginTop:20}}>メッセージはまだありません</div>}
+                {messages.map(m=>(
+                  <div key={m.id} style={{display:"flex",justifyContent:m.from==="store"?"flex-end":"flex-start"}}>
+                    <div style={{
+                      maxWidth:"70%",padding:"8px 12px",borderRadius:12,fontSize:13,lineHeight:1.5,
+                      background:m.from==="store"?C.gold:C.bg,
+                      color:m.from==="store"?C.white:C.text,
+                      border:m.from==="store"?"none":`1px solid ${C.border}`,
+                      borderBottomRightRadius:m.from==="store"?2:12,
+                      borderBottomLeftRadius:m.from==="store"?12:2,
+                    }}>
+                      <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>
+                      <div style={{fontSize:10,marginTop:4,opacity:0.7,textAlign:"right"}}>{fmtTime(m.createdAt)}</div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={bottomRef}/>
+              </div>
+              <div style={{display:"flex",gap:8,padding:12,borderTop:`1px solid ${C.border}`}}>
+                <input
+                  style={{...inp,flex:1}}
+                  placeholder="メッセージを入力"
+                  value={input}
+                  onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+                />
+                <button style={btn("primary")} onClick={send} disabled={sending||!input.trim()}>送信</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 管理：設定 ───────────────────────────────────────────
 function AdminSettings({closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours}){
   const [newDate,setNewDate]=useState(fmt(TODAY));
@@ -1031,6 +1163,137 @@ function ProfileSetup({onDone}){
         <button style={btn("primary")} onClick={submit}>登録して予約へ →</button>
       </div>
     </div>
+  );
+}
+
+// ── 客側：サイト内チャット（フローティング） ─────────────
+function CustomerSiteChat({profile}){
+  const [open,setOpen]=useState(false);
+  const [messages,setMessages]=useState([]);
+  const [input,setInput]=useState("");
+  const [sending,setSending]=useState(false);
+  const [unread,setUnread]=useState(false);
+  const bottomRef=useRef(null);
+  const phone=profile?.phone;
+
+  useEffect(()=>{
+    if(!phone) return;
+    const unsub=onSnapshot(doc(db,"siteChats",phone),(snap)=>{
+      setUnread(snap.exists()&&!!snap.data().unreadByCustomer);
+    },(err)=>console.error("サイトチャット未読取得エラー:",err));
+    return ()=>unsub();
+  },[phone]);
+
+  useEffect(()=>{
+    if(!open||!phone){ setMessages([]); return; }
+    const q=query(collection(db,"siteChats",phone,"messages"),orderBy("createdAt","asc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      setMessages(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },(err)=>console.error("サイトチャットメッセージ取得エラー:",err));
+    return ()=>unsub();
+  },[open,phone]);
+
+  useEffect(()=>{
+    if(open&&phone&&unread){
+      setDoc(doc(db,"siteChats",phone),{unreadByCustomer:false},{merge:true}).catch(e=>console.error("既読更新エラー:",e));
+    }
+  },[open,phone,unread]);
+
+  useEffect(()=>{
+    bottomRef.current?.scrollIntoView({behavior:"smooth"});
+  },[messages,open]);
+
+  const send=async()=>{
+    const text=input.trim();
+    if(!text||!phone||sending) return;
+    setSending(true);
+    try{
+      const res=await fetch("/api/siteChatSend",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({phone,name:profile.name,text,from:"customer"}),
+      });
+      if(!res.ok) throw new Error("送信に失敗しました");
+      setInput("");
+    }catch(e){
+      console.error(e);
+      alert("送信に失敗しました");
+    }finally{
+      setSending(false);
+    }
+  };
+
+  const fmtTime=(ts)=>{
+    if(!ts) return "";
+    const d=ts.toDate?ts.toDate():new Date(ts);
+    if(isNaN(d.getTime())) return "";
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  };
+
+  return(
+    <>
+      <button
+        onClick={()=>setOpen(p=>!p)}
+        aria-label="お店にチャットで問い合わせる"
+        style={{
+          position:"fixed",bottom:20,right:20,width:56,height:56,borderRadius:"50%",
+          background:C.gold,border:"none",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",cursor:"pointer",
+          zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,
+        }}
+      >
+        💬
+        {unread&&<span style={{position:"absolute",top:4,right:4,width:13,height:13,borderRadius:"50%",background:C.red,border:"2px solid #fff"}}/>}
+      </button>
+      {open&&(
+        <div style={{
+          position:"fixed",bottom:86,right:20,width:320,maxWidth:"88vw",height:440,maxHeight:"70vh",
+          background:C.card,border:`1px solid ${C.border}`,borderRadius:12,boxShadow:"0 8px 30px rgba(0,0,0,0.35)",
+          display:"flex",flexDirection:"column",overflow:"hidden",zIndex:200,
+        }}>
+          <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.gold,color:C.white}}>
+            <div style={{fontWeight:700,fontSize:14}}>店舗へのお問い合わせ</div>
+            <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:C.white,fontSize:19,cursor:"pointer",lineHeight:1,padding:0}}>×</button>
+          </div>
+          {!phone?(
+            <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:22,textAlign:"center",fontSize:13,color:C.muted}}>
+              先に予約する画面からお名前を登録してください
+            </div>
+          ):(
+            <>
+              <div style={{flex:1,overflowY:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+                {messages.length===0&&<div style={{textAlign:"center",color:C.muted,fontSize:12,marginTop:20}}>お店へメッセージを送ってみましょう</div>}
+                {messages.map(m=>(
+                  <div key={m.id} style={{display:"flex",justifyContent:m.from==="customer"?"flex-end":"flex-start"}}>
+                    <div style={{
+                      maxWidth:"78%",padding:"7px 11px",borderRadius:12,fontSize:13,lineHeight:1.5,
+                      background:m.from==="customer"?C.gold:C.bg,
+                      color:m.from==="customer"?C.white:C.text,
+                      border:m.from==="customer"?"none":`1px solid ${C.border}`,
+                      borderBottomRightRadius:m.from==="customer"?2:12,
+                      borderBottomLeftRadius:m.from==="customer"?12:2,
+                    }}>
+                      <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>
+                      <div style={{fontSize:9,marginTop:3,opacity:0.7,textAlign:"right"}}>{fmtTime(m.createdAt)}</div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={bottomRef}/>
+              </div>
+              <div style={{display:"flex",gap:6,padding:10,borderTop:`1px solid ${C.border}`}}>
+                <input
+                  style={{...inp,flex:1,fontSize:13}}
+                  placeholder="メッセージを入力"
+                  value={input}
+                  onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+                />
+                <button style={btn("primary",true)} onClick={send} disabled={sending||!input.trim()}>送信</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
