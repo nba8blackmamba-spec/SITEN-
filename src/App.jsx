@@ -18,6 +18,11 @@ const COURSES = [
   {id:"health",label:"健康麻雀",price:"3時間 ¥2,000",unit:2000,desc:"賭けなし・のんびり楽しむ"},
   {id:"labo",  label:"ラボ",    price:"1シート ¥4,000",unit:4000,desc:"戦術研究・本格競技"},
 ];
+const EVENT_TYPES = [
+  {id:"class",     label:"教室", color:"blue"},
+  {id:"tournament", label:"大会", color:"purple"},
+];
+const eventTypeInfo = (t) => EVENT_TYPES.find(x=>x.id===t) || {id:t,label:t,color:"muted"};
 const TIME_SLOTS = ["12:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30","19:00","19:30","20:00","20:30","21:00","21:30","22:00"];
 const TAGS_PRESET = ["常連","初心者","VIP","要対応","初来店"];
 const WEEKDAYS = ["日","月","火","水","木","金","土"];
@@ -132,6 +137,31 @@ export default function App() {
         setDoc(doc(db, "reservations", r.id), r).catch(e => console.error("保存エラー:", e));
       }
     });
+  };
+
+  const [eventsList, setEventsList] = useState([]);
+  const [eventApps,  setEventApps]  = useState([]);
+
+  useEffect(() => {
+    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setEventsList(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    }, (err) => console.error("イベント読み込みエラー:", err));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "eventApplications"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setEventApps(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    }, (err) => console.error("イベント申込読み込みエラー:", err));
+    return () => unsub();
+  }, []);
+
+  const saveEvent = (ev) => {
+    const id = ev.id || uid();
+    setDoc(doc(db, "events", id), { ...ev, id, createdAt: ev.createdAt || new Date().toISOString() })
+      .catch(e => console.error("イベント保存エラー:", e));
   };
 
   const [toast,     setToast]    = useState(null);
@@ -298,7 +328,7 @@ export default function App() {
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
   const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
-  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
+  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
 
   if (!dbReady) {
     return (
@@ -322,7 +352,7 @@ export default function App() {
         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
           {mode==="customer"?(
             <>
-              {[["book","予約する"],["list",`予約一覧${activeCount>0?` (${activeCount})`:""}`]].map(([k,l])=>(
+              {[["book","予約する"],["list",`予約一覧${activeCount>0?` (${activeCount})`:""}`],["events","教室・大会"]].map(([k,l])=>(
                 <button key={k} onClick={()=>setTab(k)} style={{padding:"7px 13px",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:tab===k?C.gold:"transparent",color:tab===k?C.white:C.muted}}>{l}</button>
               ))}
               <button onClick={()=>setMode("admin")} style={{padding:"7px 13px",borderRadius:6,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:12,background:"transparent",color:C.muted,marginLeft:4}}>店舗管理</button>
@@ -346,6 +376,7 @@ export default function App() {
             {tab==="book"&&profile&&<BookForm profile={profile} onProfileReset={()=>setProfile(null)} onSubmit={handleBook} isOccupied={isOccupied} seatsLeft={seatsLeft} rsvList={rsvList} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate}/>}
             {tab==="list"&&profile&&<ReservationList rsvList={rsvList.filter(r=>r.phone===profile.phone&&!r.finished&&r.date>=fmt(TODAY))} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
             {tab==="list"&&!profile&&<ProfileSetup onDone={setProfile}/>}
+            {tab==="events"&&<EventsArea profile={profile} eventsList={eventsList} eventApps={eventApps} flash={flash}/>}
           </>
         )}
         {mode==="admin"&&(
@@ -356,6 +387,7 @@ export default function App() {
                 closedDays={closedDays} setClosedDays={setClosedDays}
                 closedWeekdays={closedWeekdays} setClosedWeekdays={setClosedWeekdays}
                 cancelDeadlineHours={cancelDeadlineHours} setCancelDeadlineHours={setCancelDeadlineHours}
+                eventsList={eventsList} eventApps={eventApps} saveEvent={saveEvent}
               />
             :<AdminLogin onAuth={(name)=>{setAdminAuth(true);setAdminName(name);}}/>
         )}
@@ -371,12 +403,13 @@ export default function App() {
 // ════════════════════════════════════════════════════════
 // 管理エリア ルーター
 // ════════════════════════════════════════════════════════
-function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminName,closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours}){
+function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminName,closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours,eventsList,eventApps,saveEvent}){
   const todayStr = fmt(TODAY);
   // 今日以降・かつfinishedでない・cancelledでない予約のみ
   const activeRsv = rsvList.filter(r=>r.date>=todayStr&&!r.finished&&r.status!=="cancelled");
   if(tab==="today")    return <AdminToday    rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank} adminName={adminName}/>;
   if(tab==="list")     return <AdminList     rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank}/>;
+  if(tab==="events")   return <AdminEvents   eventsList={eventsList} eventApps={eventApps} saveEvent={saveEvent}/>;
   if(tab==="calendar") return <AdminCalendar rsvList={rsvList}/>;
   if(tab==="sales")    return <AdminSales    rsvList={rsvList}/>;
   if(tab==="regulars") return <AdminRegulars rsvList={rsvList}/>;
@@ -1060,6 +1093,126 @@ function AdminSiteChat(){
   );
 }
 
+// ── 管理：教室・大会イベント ─────────────────────────────
+function AdminEvents({eventsList,eventApps,saveEvent}){
+  const [editing,setEditing]=useState(null);
+  const [showForm,setShowForm]=useState(false);
+
+  const blankEvent=()=>({title:"",type:"class",date:fmt(TODAY),time:"",place:"",capacity:0,description:"",closed:false});
+  const startCreate=()=>{ setEditing(blankEvent()); setShowForm(true); };
+  const startEdit=(ev)=>{ setEditing({...ev}); setShowForm(true); };
+  const cancelForm=()=>{ setEditing(null); setShowForm(false); };
+
+  const submit=()=>{
+    if(!editing.title.trim()) return alert("タイトルを入力してください");
+    saveEvent({...editing,title:editing.title.trim(),capacity:Number(editing.capacity)||0});
+    setEditing(null); setShowForm(false);
+  };
+
+  const appsFor=(eventId)=>eventApps.filter(a=>a.eventId===eventId&&a.status!=="cancelled");
+  const totalPeople=(eventId)=>appsFor(eventId).reduce((s,a)=>s+(Number(a.people)||0),0);
+  const sorted=[...eventsList].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
+        <div style={tag}>教室・大会イベント管理</div>
+        {!showForm&&<button style={btn("primary",true)} onClick={startCreate}>＋ 新規イベント作成</button>}
+      </div>
+
+      {showForm&&editing&&(
+        <div style={{...crd,borderColor:C.gold}}>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>{editing.createdAt?"イベントを編集":"新規イベント作成"}</div>
+          <div style={{...rw,marginBottom:10}}>
+            <div style={{flex:2,minWidth:180}}>
+              <span style={lbl}>タイトル</span>
+              <input style={inp} value={editing.title} onChange={e=>setEditing({...editing,title:e.target.value})} placeholder="例）初心者向け麻雀教室"/>
+            </div>
+            <div style={{minWidth:120}}>
+              <span style={lbl}>種別</span>
+              <select style={sel} value={editing.type} onChange={e=>setEditing({...editing,type:e.target.value})}>
+                {EVENT_TYPES.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{...rw,marginBottom:10}}>
+            <div style={{flex:1,minWidth:140}}>
+              <span style={lbl}>日付</span>
+              <input type="date" style={inp} value={editing.date} onChange={e=>setEditing({...editing,date:e.target.value})}/>
+            </div>
+            <div style={{flex:1,minWidth:110}}>
+              <span style={lbl}>時間</span>
+              <input type="time" style={inp} value={editing.time} onChange={e=>setEditing({...editing,time:e.target.value})}/>
+            </div>
+            <div style={{flex:1,minWidth:110}}>
+              <span style={lbl}>定員（0=無制限）</span>
+              <input type="number" min="0" style={inp} value={editing.capacity} onChange={e=>setEditing({...editing,capacity:e.target.value})}/>
+            </div>
+          </div>
+          <div style={{marginBottom:10}}>
+            <span style={lbl}>開催場所（任意）</span>
+            <input style={inp} value={editing.place||""} onChange={e=>setEditing({...editing,place:e.target.value})} placeholder="例）店内フロア"/>
+          </div>
+          <div style={{marginBottom:10}}>
+            <span style={lbl}>説明</span>
+            <textarea style={{...inp,minHeight:70,resize:"vertical",fontFamily:"inherit"}} value={editing.description||""} onChange={e=>setEditing({...editing,description:e.target.value})} placeholder="イベントの詳細を入力"/>
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.text,cursor:"pointer",marginBottom:14}}>
+            <input type="checkbox" checked={!!editing.closed} onChange={e=>setEditing({...editing,closed:e.target.checked})}/>
+            募集を終了する
+          </label>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button style={btn("secondary")} onClick={cancelForm}>キャンセル</button>
+            <button style={btn("primary")} onClick={submit}>保存する</button>
+          </div>
+        </div>
+      )}
+
+      {sorted.length===0&&!showForm&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>まだイベントが登録されていません</div>}
+
+      {sorted.map(ev=>{
+        const info=eventTypeInfo(ev.type);
+        const apps=appsFor(ev.id);
+        const total=totalPeople(ev.id);
+        const capacity=Number(ev.capacity)||0;
+        const full=capacity>0&&total>=capacity;
+        return(
+          <div key={ev.id} style={{...crd,opacity:ev.closed?0.6:1}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+              <div style={{flex:1,minWidth:220}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                  <span style={bdg(info.color)}>{info.label}</span>
+                  <span style={{fontSize:15,fontWeight:700}}>{ev.title}</span>
+                  {ev.closed&&<span style={bdg("muted")}>募集終了</span>}
+                  {!ev.closed&&full&&<span style={bdg("red")}>満席</span>}
+                </div>
+                <div style={{fontSize:13,color:C.muted}}>📅 {ev.date?disp(ev.date):"未定"}{ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}</div>
+                {ev.description&&<div style={{fontSize:12,color:C.text,marginTop:6,whiteSpace:"pre-wrap"}}>{ev.description}</div>}
+                <div style={{fontSize:12,color:C.muted,marginTop:6}}>
+                  申込合計：<span style={{fontWeight:700,color:C.gold}}>{total}名</span>
+                  {capacity>0&&<> / 定員 {capacity}名</>}
+                  　（{apps.length}件）
+                </div>
+              </div>
+              <button style={btn("blue",true)} onClick={()=>startEdit(ev)}>編集</button>
+            </div>
+            {apps.length>0&&(
+              <div style={{marginTop:12,borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                {apps.map(a=>(
+                  <div key={a.id} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}55`,fontSize:12,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
+                    <div><span style={{fontWeight:700}}>{a.name}</span> 様　{a.people}名　<span style={{color:C.muted}}>{a.phone}</span></div>
+                    {a.memo&&<div style={{color:C.gold}}>📝 {a.memo}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── 管理：設定 ───────────────────────────────────────────
 function AdminSettings({closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours}){
   const [newDate,setNewDate]=useState(fmt(TODAY));
@@ -1294,6 +1447,121 @@ function CustomerSiteChat({profile}){
         </div>
       )}
     </>
+  );
+}
+
+// ── 客側：教室・大会イベント一覧 ─────────────────────────
+function EventsArea({profile,eventsList,eventApps,flash}){
+  const [applying,setApplying]=useState(null);
+
+  const appsFor=(eventId)=>eventApps.filter(a=>a.eventId===eventId&&a.status!=="cancelled");
+  const totalPeople=(eventId)=>appsFor(eventId).reduce((s,a)=>s+(Number(a.people)||0),0);
+  const sorted=[...eventsList].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+  return(
+    <div>
+      <div style={tag}>教室・大会</div>
+      {sorted.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:C.muted}}>現在募集中のイベントはありません</div>}
+      {sorted.map(ev=>{
+        const info=eventTypeInfo(ev.type);
+        const total=totalPeople(ev.id);
+        const capacity=Number(ev.capacity)||0;
+        const left=capacity>0?capacity-total:null;
+        const full=capacity>0&&total>=capacity;
+        const disabled=ev.closed||full;
+        return(
+          <div key={ev.id} style={crd}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+              <span style={bdg(info.color)}>{info.label}</span>
+              <span style={{fontSize:16,fontWeight:700}}>{ev.title}</span>
+              {ev.closed&&<span style={bdg("muted")}>募集終了</span>}
+              {!ev.closed&&full&&<span style={bdg("red")}>満席</span>}
+            </div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📅 {ev.date?disp(ev.date):"日程未定"}{ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}</div>
+            {ev.description&&<div style={{fontSize:13,color:C.text,marginBottom:8,whiteSpace:"pre-wrap"}}>{ev.description}</div>}
+            {left!==null&&!ev.closed&&<div style={{fontSize:12,color:full?C.red:C.green,marginBottom:10,fontWeight:700}}>{full?"満席":`残り ${left}名`}</div>}
+            <button style={btn(disabled?"secondary":"primary")} disabled={disabled} onClick={()=>setApplying(ev)}>
+              {ev.closed?"募集終了":full?"満席":"申し込む →"}
+            </button>
+          </div>
+        );
+      })}
+      {applying&&(
+        <EventApplyModal
+          event={applying}
+          profile={profile}
+          onClose={()=>setApplying(null)}
+          onSuccess={()=>{setApplying(null);flash("イベントに申し込みました ✓");}}
+        />
+      )}
+    </div>
+  );
+}
+
+function EventApplyModal({event,profile,onClose,onSuccess}){
+  const [name,setName]=useState(profile?.name||"");
+  const [phone,setPhone]=useState(profile?.phone||"");
+  const [people,setPeople]=useState(1);
+  const [memo,setMemo]=useState("");
+  const [err,setErr]=useState("");
+  const [submitting,setSubmitting]=useState(false);
+  const info=eventTypeInfo(event.type);
+
+  const submit=async()=>{
+    const ne=validateName(name); const pe=validatePhone(phone);
+    if(ne||pe){ setErr(ne||pe); return; }
+    setErr(""); setSubmitting(true);
+    try{
+      const res=await fetch("/api/eventApply",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({eventId:event.id,name:name.trim(),phone:phone.trim(),people,memo:memo.trim()}),
+      });
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||"送信に失敗しました");
+      onSuccess();
+    }catch(e){
+      setErr(e.message);
+    }finally{
+      setSubmitting(false);
+    }
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}} onClick={onClose}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:26,maxWidth:420,width:"90%",boxSizing:"border-box",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{...tag,marginBottom:4}}>申し込みフォーム</div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+          <span style={bdg(info.color)}>{info.label}</span>
+          <span style={{fontSize:15,fontWeight:700}}>{event.title}</span>
+        </div>
+        <div style={{...rw,marginBottom:10}}>
+          <div style={{flex:1,minWidth:140}}>
+            <span style={lbl}>お名前</span>
+            <input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="山田 太郎"/>
+          </div>
+          <div style={{flex:1,minWidth:140}}>
+            <span style={lbl}>電話番号</span>
+            <input style={inp} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="090-1234-5678"/>
+          </div>
+        </div>
+        <div style={{marginBottom:10}}>
+          <span style={lbl}>人数</span>
+          <select style={sel} value={people} onChange={e=>setPeople(Number(e.target.value))}>
+            {[1,2,3,4,5,6,7,8].map(n=><option key={n} value={n}>{n}名</option>)}
+          </select>
+        </div>
+        <div style={{marginBottom:14}}>
+          <span style={lbl}>コメント（任意）</span>
+          <textarea style={{...inp,minHeight:60,resize:"vertical",fontFamily:"inherit"}} value={memo} onChange={e=>setMemo(e.target.value)} placeholder="ご質問等あればご記入ください"/>
+        </div>
+        {err&&<div style={{color:C.red,fontSize:13,marginBottom:10}}>⚠ {err}</div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button style={btn("secondary")} onClick={onClose}>閉じる</button>
+          <button style={btn("primary")} onClick={submit} disabled={submitting}>{submitting?"送信中...":"申し込む"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
