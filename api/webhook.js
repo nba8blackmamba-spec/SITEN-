@@ -100,7 +100,45 @@ export default async function handler(req, res) {
         console.error("表示名チェックエラー:", e);
       }
 
+      // 「リマインド希望 電話番号」形式のメッセージを検出し、電話番号とLINEユーザーIDを紐づける
+      let linkedPhone = null;
+      if (messageText) {
+        const m = messageText.match(/リマインド希望[\s　]*([0-9０-９\-ー－\s　]{9,17})/);
+        if (m) {
+          const phoneDigits = m[1]
+            .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+            .replace(/[^\d]/g, "");
+          if (/^0\d{9,10}$/.test(phoneDigits)) {
+            linkedPhone = phoneDigits;
+            update.phone = phoneDigits;
+          }
+        }
+      }
+
       await setDoc(userRef, update, { merge: true });
+
+      if (linkedPhone) {
+        try {
+          await setDoc(doc(db, "phoneToLineUserId", linkedPhone), { lineUserId: userId });
+        } catch (e) {
+          console.error("電話番号紐づけエラー:", e);
+        }
+        try {
+          await fetch("https://api.line.me/v2/bot/message/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${lineToken}`,
+            },
+            body: JSON.stringify({
+              to: userId,
+              messages: [{ type: "text", text: "LINE通知の設定が完了しました。次回のご予約から自動でリマインドをお送りします" }],
+            }),
+          });
+        } catch (e) {
+          console.error("確認メッセージ送信エラー:", e);
+        }
+      }
 
       if (messageText) {
         await addDoc(collection(db, "lineUsers", userId, "messages"), {

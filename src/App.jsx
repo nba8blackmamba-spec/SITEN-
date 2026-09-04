@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, doc, onSnapshot, setDoc, query, orderBy } from "firebase/firestore";
+import { collection, doc, onSnapshot, setDoc, getDoc, query, orderBy } from "firebase/firestore";
 
 const SITEN_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAflBMVEX88QMPYaoAAAD+/AKko1QFY7DepyoOYq777gZhZnL76gdLdZcOYq5zkWuRdFf8swkAf3+yoTkAAP9piIwAP78AefAANn/EkEG0tAC6xTy2xEkA///Dxkf3eBzedU85Xn8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1YsZFAAAAIHRSTlP+/gAK/w3+XGP+nf+k//8OAv4B/wQFA/8D//8B/woP/3UTSsEAAAPaSURBVHjatZrZlpswDIZlbEiwIZAwWWc6ff+3rA1JMHiVUnTRTjvn6LN+yQuWoYhbD9z8xfd7KeFtUu730/9znnAA0d+W5ejccm2bHCEJRgxgvJcQtyeDAtDu+13DxMqjEL44wggIuy93jLG6WvlTrT8MjgJ8l5N7xo6zm58xAKXGf9wdRCAICAx/cs9UZY/9oQHDcDd/1k4URXHLBJz08JvJPztYLgalEyK0QcuUcGvKH4QL6N/D17bwowYhKm1CDMpbUUXRpQHW8LVdbQcPcQ1UkhVECqD9M8uWNXR0flibS1gBvpb+5wh+xNCKN64SWi7/xFsTYDX+3cL/nIOWwbAAMN+E8BAg6t+uIl0+s0QilAaHAAt91v7ZstzFO4Do8rQgQNT/cqV4DbuKjN8hQKh+3DISenqJY1VpfZSCXMIbcPb6t5Og2HA0UfzoBYkNUYJVrfBeH7z+rcXo2N6nxc6kWrTxbWLeheCdgMYLcPYDNUCGyWIFKD0J9qRZWy1yAHMaJkDflyxkK4dHyLOXSPAMoAkCnD0tz14iQVyg9Z6AsKdIIyAiED2Ep0gGcIkG8EEI3QsQDcDZFXAhgH8N+i8ijVkAM4lZyg70ECBRQh+JZEKA6Bz4VCQD6Iu0QmSReHGDLIWoIunpDOcchcgicQ55ClFFMkneZQKYINURZCpETIMs4JTtn5QGDmU+gJIGDjsEYHnYzksCDoAXSUKDAeBFwgIYPgsMadXWgHprAHpCowHYSkIDsJWEB7Dj1gCcSAQATiQKADUZSADMZGhIhOvWgOw8S9xyjZ/PZEBuCHvUlkkoJA492zQEjjm2EEKQmIMXZTqbg1e5pUbj8Z1tqJE+/JZbamSO7/2WGnENKM4b1lGR/RFIWy6mj8Ccz1hiEvgE+KKGcEinePoQ/yaGUCdrdAKQQ6hzbowM4BS7zlFkAAeecSHVtlSAfSEVvk5QQAbwzr4UDJWqiAEO8RLtcq41IQYQyesu62L24hfJ3FhTlgpZ3PgS8O2vpPHKmrDYuVfLgcvxO8CDkALP5XggDS2ERapw1/sBgggSamyDwk9Qj6lFhKghGWqxRGLQCJWbYrlsBybaXM/lQjj+gxnQEwAijbrs7e2QmmChVuMl7wwQEqhz2qVOs/Rr0SzFTWLp+ve0e8siLVOoj5nT7tX7zzkVhAgMn//JbLlf4kH4P8R9ww8+Guj716OBTP/yF/VoYMrE2Yv4e/Wqg3z2YDJxMYgmoz73WvmOE56eGMQ63Y5/M3ji05OxwXkyjDkOsX50Ah89nhn3oXJ6pbNrGnv4Ujv/Nb/pbgkH/wDdEDFg1IeT4wAAAABJRU5ErkJggg==";
 // ── 定数 ────────────────────────────────────────────────
@@ -18,6 +18,7 @@ const COURSES = [
   {id:"health",label:"健康麻雀",price:"3時間 ¥2,000",unit:2000,desc:"賭けなし・のんびり楽しむ"},
   {id:"labo",  label:"ラボ",    price:"1シート ¥4,000",unit:4000,desc:"戦術研究・本格競技"},
 ];
+const LINE_BASIC_ID = "@613uibyw";
 const EVENT_TYPES = [
   {id:"class",     label:"教室", color:"blue"},
   {id:"tournament", label:"大会", color:"purple"},
@@ -286,8 +287,18 @@ export default function App() {
       });
     } catch (e) { console.error("通知エラー:", e); }
   };
-  const handleBook = (rsv) => {
+  const lookupLineUserId = async (phone) => {
+    const digits = (phone||"").replace(/[^\d]/g,"");
+    if(!digits) return null;
+    try {
+      const snap = await getDoc(doc(db,"phoneToLineUserId",digits));
+      return snap.exists() ? snap.data().lineUserId : null;
+    } catch(e) { console.error("LINE紐づけ取得エラー:",e); return null; }
+  };
+  const handleBook = async (rsv) => {
     if(!profile) setProfile({name:rsv.name,phone:rsv.phone});
+    const lineUserId = await lookupLineUserId(rsv.phone);
+    const lineFields = lineUserId ? {lineUserId} : {};
     if(rsv.repeatWeeks>1){
       // 定期予約：複数件まとめて作成
       let list=[...rsvList];
@@ -297,7 +308,7 @@ export default function App() {
         if(isClosedDate(d)) continue;
         const left = SEATS - list.filter(r=>r.tableId===rsv.tableId&&r.date===d&&r.time===rsv.time&&r.status==="confirmed"&&!r.finished).reduce((s,r)=>s+r.people,0);
         const status = left>=rsv.people ? "confirmed" : "waitlist";
-        list = [{...rsv,id:uid(),date:d,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...list];
+        list = [{...rsv,...lineFields,id:uid(),date:d,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...list];
         status==="confirmed" ? createdCount++ : waitCount++;
       }
       setRsvList(list);
@@ -306,7 +317,7 @@ export default function App() {
     } else {
       const left=seatsLeft(rsv.tableId,rsv.date,rsv.time);
       const status=left>=rsv.people?"confirmed":"waitlist";
-      setRsvList(p=>[{...rsv,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...p]);
+      setRsvList(p=>[{...rsv,...lineFields,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...p]);
       flash(status==="confirmed"?"予約が確定しました ✓":"キャンセル待ちで登録しました");
       const table=TABLES.find(t=>t.id===rsv.tableId);
       notifyOwner(`【新規予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n卓: ${table?table.label:"未定"}\nステータス: ${status==="confirmed"?"確定":"キャンセル待ち"}`);
@@ -1597,9 +1608,16 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
   return(
     <div>
       <div style={tag}>予約する</div>
-      <div style={{background:C.surface,border:`1px solid ${C.gold}44`,borderRadius:8,padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+      <div style={{background:C.surface,border:`1px solid ${C.gold}44`,borderRadius:8,padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
         <div><div style={{fontSize:15,fontWeight:700}}>{profile.name} 様</div><div style={{fontSize:12,color:C.muted}}>{profile.phone}</div></div>
-        <button onClick={onProfileReset} style={{fontSize:12,color:C.gold,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>変更</button>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <a
+            href={`https://line.me/R/oaMessage/${LINE_BASIC_ID}/?${encodeURIComponent(`リマインド希望 ${profile.phone.replace(/[^\d]/g,"")}`)}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{fontSize:12,color:C.white,background:"#06C755",padding:"7px 12px",borderRadius:6,textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}
+          >LINEでリマインドを受け取る</a>
+          <button onClick={onProfileReset} style={{fontSize:12,color:C.gold,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>変更</button>
+        </div>
       </div>
 
       {closed&&(
