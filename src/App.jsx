@@ -18,7 +18,7 @@ const COURSES = [
   {id:"health",label:"健康麻雀",price:"3時間 ¥2,000",unit:2000,desc:"賭けなし・のんびり楽しむ"},
   {id:"labo",  label:"ラボ",    price:"1シート ¥4,000",unit:4000,desc:"戦術研究・本格競技"},
 ];
-const LINE_BASIC_ID = "REPLACE_ME_LINE_ID";
+const LINE_BASIC_ID = "@613uibyw";
 const EVENT_TYPES = [
   {id:"class",     label:"教室", color:"blue"},
   {id:"tournament", label:"大会", color:"purple"},
