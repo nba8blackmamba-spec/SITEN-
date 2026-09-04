@@ -67,10 +67,11 @@ const rw  = {display:"flex",gap:10,flexWrap:"wrap"};
 const lbl = {fontSize:11,color:C.muted,marginBottom:5,display:"block"};
 const tag = {fontSize:11,fontWeight:700,color:C.gold,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:16};
 const btn = (v="primary",sm=false) => ({
-  padding:sm?"6px 12px":"10px 22px",borderRadius:6,border:"none",cursor:"pointer",
+  padding:sm?"6px 12px":"10px 22px",borderRadius:6,
+  border:v==="cancel"?`1.5px solid ${C.red}`:"none",cursor:"pointer",
   fontSize:sm?12:14,fontWeight:700,
-  background:v==="primary"?C.gold:v==="danger"?C.red:v==="blue"?C.blue:v==="green"?C.green:C.border,
-  color:v==="primary"?C.white:C.white,
+  background:v==="primary"?C.gold:v==="danger"?C.red:v==="blue"?C.blue:v==="green"?C.green:v==="cancel"?C.white:C.border,
+  color:v==="cancel"?C.red:C.white,
 });
 const chip = (a) => ({
   padding:"10px 16px",borderRadius:8,border:`1px solid ${a?C.gold:C.border}`,
@@ -635,8 +636,8 @@ function AdminCard({rsv,onCancel,onUpdate,rank,showCheckin}){
           )}
           {!isDone&&!rsv.finished&&(
             confirm
-              ?<button style={btn("danger",true)} onClick={()=>{onCancel(rsv.id);setConfirm(false);}}>本当にキャンセル</button>
-              :<button style={btn("secondary",true)} onClick={()=>setConfirm(true)}>キャンセル</button>
+              ?<button style={btn("cancel",true)} onClick={()=>{onCancel(rsv.id);setConfirm(false);}}>本当にキャンセル</button>
+              :<button style={btn("cancel",true)} onClick={()=>setConfirm(true)}>キャンセル</button>
           )}
         </div>
       </div>
@@ -1162,7 +1163,7 @@ function AdminEvents({eventsList,eventApps,saveEvent}){
             募集を終了する
           </label>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button style={btn("secondary")} onClick={cancelForm}>キャンセル</button>
+            <button style={btn("cancel")} onClick={cancelForm}>キャンセル</button>
             <button style={btn("primary")} onClick={submit}>保存する</button>
           </div>
         </div>
@@ -1756,7 +1757,7 @@ function ResCard({rsv,onCancel,onEdit,rank,seatsLeft,canCancel}){
         {!isDone&&(
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
             {rsv.status!=="waitlist"&&<button style={btn("blue",true)} onClick={()=>onEdit(rsv)}>変更</button>}
-            {cancelOk&&(confirm?<button style={btn("danger",true)} onClick={()=>{onCancel(rsv.id);setConfirm(false);}}>本当にキャンセル</button>:<button style={btn("danger",true)} onClick={()=>setConfirm(true)}>キャンセル</button>)}
+            {cancelOk&&(confirm?<button style={btn("cancel",true)} onClick={()=>{onCancel(rsv.id);setConfirm(false);}}>本当にキャンセル</button>:<button style={btn("cancel",true)} onClick={()=>setConfirm(true)}>キャンセル</button>)}
           </div>
         )}
       </div>
