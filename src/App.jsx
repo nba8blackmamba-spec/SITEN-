@@ -312,9 +312,11 @@ export default function App() {
     } catch(e) { console.error("LINE紐づけ取得エラー:",e); return null; }
   };
   const handleBook = async (rsv) => {
-    if(!profile) setProfile({name:rsv.name,phone:rsv.phone});
+    const isStaffBooking = rsv.createdBy==="staff";
+    if(!profile && !isStaffBooking) setProfile({name:rsv.name,phone:rsv.phone});
     const lineUserId = await lookupLineUserId(rsv.phone);
     const lineFields = lineUserId ? {lineUserId} : {};
+    const staffNote = isStaffBooking ? `\n(代行入力: ${rsv.createdByName||"スタッフ"})` : "";
     if(rsv.repeatWeeks>1){
       // 定期予約：複数件まとめて作成
       let list=[...rsvList];
@@ -329,16 +331,16 @@ export default function App() {
       }
       setRsvList(list);
       flash(`定期予約：確定${createdCount}件${waitCount>0?`／待ち${waitCount}件`:""} ✓`);
-      notifyOwner(`【定期予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n確定: ${createdCount}件／待ち: ${waitCount}件`);
+      notifyOwner(`【定期予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n確定: ${createdCount}件／待ち: ${waitCount}件${staffNote}`);
     } else {
       const left=seatsLeft(rsv.tableId,rsv.date,rsv.time);
       const status=left>=rsv.people?"confirmed":"waitlist";
       setRsvList(p=>[{...rsv,...lineFields,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...p]);
       flash(status==="confirmed"?"予約が確定しました ✓":"キャンセル待ちで登録しました");
       const table=TABLES.find(t=>t.id===rsv.tableId);
-      notifyOwner(`【新規予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n卓: ${table?table.label:"未定"}\nステータス: ${status==="confirmed"?"確定":"キャンセル待ち"}`);
+      notifyOwner(`【新規予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n卓: ${table?table.label:"未定"}\nステータス: ${status==="confirmed"?"確定":"キャンセル待ち"}${staffNote}`);
     }
-    setTab("list");
+    if(!isStaffBooking) setTab("list");
   };
   const handleCancel = (id) => {
     const rsv=rsvList.find(r=>r.id===id);
@@ -356,7 +358,7 @@ export default function App() {
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
   const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
-  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
+  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["newbooking","予約を代行入力"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
 
   if (!dbReady) {
     return (
@@ -412,6 +414,7 @@ export default function App() {
             ?<AdminArea
                 tab={adminTab} rsvList={rsvList} onCancel={adminCancel} onUpdate={adminUpdate} waitlistRank={waitlistRank} seatsLeft={seatsLeft}
                 adminName={adminName}
+                onBook={handleBook} isOccupied={isOccupied} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate}
                 closedDays={closedDays} setClosedDays={setClosedDays}
                 closedWeekdays={closedWeekdays} setClosedWeekdays={setClosedWeekdays}
                 cancelDeadlineHours={cancelDeadlineHours} setCancelDeadlineHours={setCancelDeadlineHours}
@@ -431,12 +434,13 @@ export default function App() {
 // ════════════════════════════════════════════════════════
 // 管理エリア ルーター
 // ════════════════════════════════════════════════════════
-function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminName,closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours,eventsList,eventApps,saveEvent}){
+function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminName,onBook,isOccupied,isClosedDate,hasDuplicate,closedDays,setClosedDays,closedWeekdays,setClosedWeekdays,cancelDeadlineHours,setCancelDeadlineHours,eventsList,eventApps,saveEvent}){
   const todayStr = fmt(TODAY);
   // 今日以降・かつfinishedでない・cancelledでない予約のみ
   const activeRsv = rsvList.filter(r=>r.date>=todayStr&&!r.finished&&r.status!=="cancelled");
   if(tab==="today")    return <AdminToday    rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank} adminName={adminName}/>;
   if(tab==="list")     return <AdminList     rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank}/>;
+  if(tab==="newbooking") return <AdminBooking rsvList={rsvList} isOccupied={isOccupied} seatsLeft={seatsLeft} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate} onBook={onBook} adminName={adminName}/>;
   if(tab==="events")   return <AdminEvents   eventsList={eventsList} eventApps={eventApps} saveEvent={saveEvent}/>;
   if(tab==="calendar") return <AdminCalendar rsvList={rsvList}/>;
   if(tab==="sales")    return <AdminSales    rsvList={rsvList}/>;
@@ -614,9 +618,11 @@ function AdminCard({rsv,onCancel,onUpdate,rank,showCheckin}){
             {rsv.checkedIn&&!rsv.finished&&<span style={bdg("purple")}>来店済み</span>}
             {rsv.finished&&<span style={bdg("muted")}>利用終了・卓解放済み</span>}
             {rsv.noShow&&<span style={bdg("red")}>ノーショー</span>}
+            {rsv.createdBy==="staff"&&<span style={bdg("orange")}>代行入力</span>}
           </div>
           <div style={{fontSize:13,color:C.muted}}>📅 {disp(rsv.date)}　🕐 {rsv.time}〜　🀄 {table?.label}　📋 {course?.label}</div>
-          <div style={{fontSize:11,color:C.muted,marginTop:2}}>ID: {rsv.id} · {rsv.phone}</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>ID: {rsv.id} · {rsv.phone||"電話番号未登録"}</div>
+          {rsv.createdBy==="staff"&&<div style={{fontSize:11,color:C.orange,marginTop:2}}>📞 代行入力：{rsv.createdByName||"スタッフ"}</div>}
           {/* タグ */}
           <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:8}}>
             {TAGS_PRESET.map(t=>(
@@ -1351,6 +1357,28 @@ function AdminSettings({closedDays,setClosedDays,closedWeekdays,setClosedWeekday
   );
 }
 
+// ── 管理：予約の代行入力（電話予約など） ─────────────────
+function AdminBooking({rsvList,isOccupied,seatsLeft,isClosedDate,hasDuplicate,onBook,adminName}){
+  return(
+    <div>
+      <div style={tag}>予約を代行入力</div>
+      <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+        電話予約など、お客様の代わりにスタッフが予約を入力できます。入力担当: <span style={{color:C.gold,fontWeight:700}}>{adminName}</span>
+      </div>
+      <BookForm
+        staffMode
+        adminName={adminName}
+        onSubmit={onBook}
+        isOccupied={isOccupied}
+        seatsLeft={seatsLeft}
+        rsvList={rsvList}
+        isClosedDate={isClosedDate}
+        hasDuplicate={hasDuplicate}
+      />
+    </div>
+  );
+}
+
 // ── 客側：プロフィール ───────────────────────────────────
 function ProfileSetup({onDone}){
   const [name,setName]=useState(""); const [phone,setPhone]=useState("");
@@ -1636,8 +1664,12 @@ function EventApplyModal({event,profile,onClose,onSuccess}){
   );
 }
 
-// ── 客側：予約フォーム ───────────────────────────────────
-function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,isClosedDate,hasDuplicate}){
+// ── 客側：予約フォーム（staffMode=trueで管理画面の代行入力にも流用） ─
+function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,isClosedDate,hasDuplicate,staffMode=false,adminName}){
+  const [name,setName]=useState(profile?.name||"");
+  const [phone,setPhone]=useState(profile?.phone||"");
+  const [nameErr,setNameErr]=useState("");
+  const [phoneErr,setPhoneErr]=useState("");
   const [people,setPeople]=useState(1); const [date,setDate]=useState(fmt(TODAY));
   const [time,setTime]=useState("12:30"); const [tableId,setTableId]=useState(null);
   const [course,setCourse]=useState("health"); const [err,setErr]=useState("");
@@ -1648,15 +1680,25 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
   const pressTimer=useRef(null);
   const reset=()=>{setTableId(null);setShowWaitlist(false);};
   const closed=isClosedDate(date);
-  const dup=hasDuplicate(profile.phone,date);
+  const custName=staffMode?name.trim():profile.name;
+  const custPhone=staffMode?phone.trim():profile.phone;
+  const dup=custPhone?hasDuplicate(custPhone,date):false;
 
   const submit=(forceWaitlist=false)=>{
+    if(staffMode){
+      const ne=validateName(name);
+      const pe=phone.trim()?validatePhone(phone):null;
+      if(ne||pe){ setNameErr(ne||""); setPhoneErr(pe||""); return; }
+    }
     if(closed) return setErr("休業日のため予約できません");
     if(!tableId&&!forceWaitlist) return setErr("卓を選択してください");
     setErr("");
     const tags=isBeginner?["初心者"]:[];
-    onSubmit({id:uid(),name:profile.name,phone:profile.phone,people,date,time,tableId:tableId||(forceWaitlist?parseInt(showWaitlist):null),course,tags,repeatWeeks});
+    const rsv={id:uid(),name:custName,phone:custPhone,people,date,time,tableId:tableId||(forceWaitlist?parseInt(showWaitlist):null),course,tags,repeatWeeks};
+    if(staffMode){ rsv.createdBy="staff"; rsv.createdByName=adminName||"スタッフ"; }
+    onSubmit(rsv);
     setTableId(null);setShowWaitlist(false);setIsBeginner(false);setRepeatWeeks(1);
+    if(staffMode){ setName(""); setPhone(""); setNameErr(""); setPhoneErr(""); }
   };
   const allFull=TABLES.every(t=>seatsLeft(t.id,date,time)<=0);
   const tableGuests=(tid)=>rsvList.filter(r=>r.tableId===tid&&r.date===date&&r.time===time&&r.status==="confirmed");
@@ -1666,18 +1708,36 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
 
   return(
     <div>
-      <div style={tag}>予約する</div>
-      <div style={{background:C.surface,border:`1px solid ${C.gold}44`,borderRadius:8,padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-        <div><div style={{fontSize:15,fontWeight:700}}>{profile.name} 様</div><div style={{fontSize:12,color:C.muted}}>{profile.phone}</div></div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <a
-            href={`https://line.me/R/oaMessage/${LINE_BASIC_ID}/?${encodeURIComponent(`リマインド希望 ${profile.phone.replace(/[^\d]/g,"")}`)}`}
-            target="_blank" rel="noopener noreferrer"
-            style={{fontSize:12,color:C.white,background:"#06C755",padding:"7px 12px",borderRadius:6,textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}
-          >LINEでリマインドを受け取る</a>
-          <button onClick={onProfileReset} style={{fontSize:12,color:C.gold,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>変更</button>
+      {!staffMode&&<div style={tag}>予約する</div>}
+      {staffMode?(
+        <div style={crd}>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>予約者情報</div>
+          <div style={rw}>
+            <div style={{flex:1,minWidth:160}}>
+              <span style={lbl}>お名前 <span style={{color:C.red}}>*</span></span>
+              <input style={{...inp,borderColor:nameErr?C.red:C.border}} placeholder="山田 太郎" value={name} onChange={e=>{setName(e.target.value);setNameErr("");}}/>
+              {nameErr&&<div style={{color:C.red,fontSize:11,marginTop:4}}>⚠ {nameErr}</div>}
+            </div>
+            <div style={{flex:1,minWidth:160}}>
+              <span style={lbl}>電話番号（任意）</span>
+              <input style={{...inp,borderColor:phoneErr?C.red:C.border}} placeholder="090-1234-5678（未入力可）" value={phone} onChange={e=>{setPhone(e.target.value);setPhoneErr("");}}/>
+              {phoneErr&&<div style={{color:C.red,fontSize:11,marginTop:4}}>⚠ {phoneErr}</div>}
+            </div>
+          </div>
         </div>
-      </div>
+      ):(
+        <div style={{background:C.surface,border:`1px solid ${C.gold}44`,borderRadius:8,padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+          <div><div style={{fontSize:15,fontWeight:700}}>{profile.name} 様</div><div style={{fontSize:12,color:C.muted}}>{profile.phone}</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <a
+              href={`https://line.me/R/oaMessage/${LINE_BASIC_ID}/?${encodeURIComponent(`リマインド希望 ${profile.phone.replace(/[^\d]/g,"")}`)}`}
+              target="_blank" rel="noopener noreferrer"
+              style={{fontSize:12,color:C.white,background:"#06C755",padding:"7px 12px",borderRadius:6,textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}
+            >LINEでリマインドを受け取る</a>
+            <button onClick={onProfileReset} style={{fontSize:12,color:C.gold,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>変更</button>
+          </div>
+        </div>
+      )}
 
       {closed&&(
         <div style={{background:`${C.red}15`,border:`1px solid ${C.red}55`,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:C.red,fontWeight:700}}>
@@ -1819,9 +1879,11 @@ function ResCard({rsv,onCancel,onEdit,rank,seatsLeft,canCancel}){
             <span style={{fontSize:15,fontWeight:700}}>{rsv.name} 様　{rsv.people}名</span>
             <span style={bdg(st.color)}>{st.label}</span>
             {rank&&<span style={bdg("blue")}>{rank}番待ち</span>}
+            {rsv.createdBy==="staff"&&<span style={bdg("orange")}>代行入力</span>}
           </div>
           <div style={{fontSize:13,color:C.muted}}>📅 {disp(rsv.date)}　🕐 {rsv.time}〜　🀄 {table?.label||"―"}　📋 {course?.label}</div>
           <div style={{fontSize:11,color:C.muted,marginTop:3}}>ID: {rsv.id} · {rsv.phone}</div>
+          {rsv.createdBy==="staff"&&<div style={{fontSize:11,color:C.orange,marginTop:2}}>📞 代行入力：{rsv.createdByName||"スタッフ"}</div>}
           {!isDone&&rsv.status==="confirmed"&&left!==null&&(
             <div style={{marginTop:8,display:"inline-flex",alignItems:"center",gap:6,background:isFull?`${C.green}18`:`${C.orange}18`,border:`1px solid ${isFull?C.green:C.orange}`,borderRadius:6,padding:"4px 10px"}}>
               <span style={{fontSize:12,color:isFull?C.green:C.orange,fontWeight:700}}>{isFull?"🀄 満卓です":`あと ${left} 人で満卓`}</span>
