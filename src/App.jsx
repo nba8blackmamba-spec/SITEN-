@@ -36,6 +36,22 @@ const maxDate = () => { const d=new Date(TODAY); d.setDate(d.getDate()+60); retu
 const getDates = (n=14) => { const arr=[]; for(let i=0;i<n;i++){const d=new Date(TODAY);d.setDate(d.getDate()+i);arr.push(fmt(d));} return arr; };
 const addDays = (dateStr,n) => { const d=new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+n); return fmt(d); };
 const daysBetween = (d1,d2) => Math.round((new Date(d2+"T00:00:00")-new Date(d1+"T00:00:00"))/86400000);
+// 今日以降で直近の指定曜日を返す（毎週くり返しイベント用）
+const nextOccurrenceDate = (weekday) => {
+  const d = new Date(); d.setHours(0,0,0,0);
+  const diff = ((Number(weekday)||0) - d.getDay() + 7) % 7;
+  d.setDate(d.getDate()+diff);
+  return fmt(d);
+};
+const eventOccurrenceDate = (ev) => ev.recurring ? nextOccurrenceDate(ev.weekday) : ev.date;
+// 日付が変わったら毎週くり返しイベントの次回開催日を再計算させるための強制再描画
+const useDailyRefresh = () => {
+  const [,setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(x=>x+1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+};
 
 // ── バリデーション ──────────────────────────────────────
 const validateName = (v) => {
@@ -1107,23 +1123,31 @@ function AdminSiteChat(){
 
 // ── 管理：教室・大会イベント ─────────────────────────────
 function AdminEvents({eventsList,eventApps,saveEvent}){
+  useDailyRefresh();
   const [editing,setEditing]=useState(null);
   const [showForm,setShowForm]=useState(false);
 
-  const blankEvent=()=>({title:"",type:"class",date:fmt(TODAY),time:"",place:"",capacity:0,description:"",closed:false});
+  const blankEvent=()=>({title:"",type:"class",date:fmt(TODAY),time:"",place:"",capacity:0,description:"",closed:false,recurring:false,weekday:TODAY.getDay()});
   const startCreate=()=>{ setEditing(blankEvent()); setShowForm(true); };
-  const startEdit=(ev)=>{ setEditing({...ev}); setShowForm(true); };
+  const startEdit=(ev)=>{ setEditing({...blankEvent(),...ev}); setShowForm(true); };
   const cancelForm=()=>{ setEditing(null); setShowForm(false); };
 
   const submit=()=>{
     if(!editing.title.trim()) return alert("タイトルを入力してください");
-    saveEvent({...editing,title:editing.title.trim(),capacity:Number(editing.capacity)||0});
+    const recurring=!!editing.recurring;
+    saveEvent({
+      ...editing,
+      title:editing.title.trim(),
+      capacity:Number(editing.capacity)||0,
+      recurring,
+      weekday:recurring?(Number(editing.weekday)||0):null,
+      date:recurring?"":editing.date,
+    });
     setEditing(null); setShowForm(false);
   };
 
   const appsFor=(eventId)=>eventApps.filter(a=>a.eventId===eventId&&a.status!=="cancelled");
-  const totalPeople=(eventId)=>appsFor(eventId).reduce((s,a)=>s+(Number(a.people)||0),0);
-  const sorted=[...eventsList].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const sorted=[...eventsList].sort((a,b)=>eventOccurrenceDate(b).localeCompare(eventOccurrenceDate(a)));
 
   return(
     <div>
@@ -1147,10 +1171,20 @@ function AdminEvents({eventsList,eventApps,saveEvent}){
               </select>
             </div>
           </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.text,cursor:"pointer",marginBottom:10}}>
+            <input type="checkbox" checked={!!editing.recurring} onChange={e=>setEditing({...editing,recurring:e.target.checked})}/>
+            毎週くり返す
+          </label>
           <div style={{...rw,marginBottom:10}}>
             <div style={{flex:1,minWidth:140}}>
-              <span style={lbl}>日付</span>
-              <input type="date" style={inp} value={editing.date} onChange={e=>setEditing({...editing,date:e.target.value})}/>
+              <span style={lbl}>{editing.recurring?"曜日":"日付"}</span>
+              {editing.recurring?(
+                <select style={sel} value={editing.weekday??0} onChange={e=>setEditing({...editing,weekday:Number(e.target.value)})}>
+                  {WEEKDAYS.map((w,i)=><option key={i} value={i}>{w}曜日</option>)}
+                </select>
+              ):(
+                <input type="date" style={inp} value={editing.date} onChange={e=>setEditing({...editing,date:e.target.value})}/>
+              )}
             </div>
             <div style={{flex:1,minWidth:110}}>
               <span style={lbl}>時間</span>
@@ -1184,10 +1218,15 @@ function AdminEvents({eventsList,eventApps,saveEvent}){
 
       {sorted.map(ev=>{
         const info=eventTypeInfo(ev.type);
+        const currentOcc=eventOccurrenceDate(ev);
         const apps=appsFor(ev.id);
-        const total=totalPeople(ev.id);
+        const currentApps=apps.filter(a=>a.occurrenceDate===currentOcc);
+        const total=currentApps.reduce((s,a)=>s+(Number(a.people)||0),0);
         const capacity=Number(ev.capacity)||0;
         const full=capacity>0&&total>=capacity;
+        const groups={};
+        apps.forEach(a=>{ const k=a.occurrenceDate||"unknown"; (groups[k]=groups[k]||[]).push(a); });
+        const groupEntries=Object.entries(groups).sort((a,b)=>b[0].localeCompare(a[0]));
         return(
           <div key={ev.id} style={{...crd,opacity:ev.closed?0.6:1}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
@@ -1197,25 +1236,40 @@ function AdminEvents({eventsList,eventApps,saveEvent}){
                   <span style={{fontSize:15,fontWeight:700}}>{ev.title}</span>
                   {ev.closed&&<span style={bdg("muted")}>募集終了</span>}
                   {!ev.closed&&full&&<span style={bdg("red")}>満席</span>}
+                  {ev.recurring&&<span style={bdg("blue")}>毎週{WEEKDAYS[ev.weekday]}曜</span>}
                 </div>
-                <div style={{fontSize:13,color:C.muted}}>📅 {ev.date?disp(ev.date):"未定"}{ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}</div>
+                <div style={{fontSize:13,color:C.muted}}>
+                  📅 {ev.recurring?`次回 ${disp(currentOcc)}`:(ev.date?disp(ev.date):"未定")}
+                  {ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}
+                </div>
                 {ev.description&&<div style={{fontSize:12,color:C.text,marginTop:6,whiteSpace:"pre-wrap"}}>{ev.description}</div>}
                 <div style={{fontSize:12,color:C.muted,marginTop:6}}>
-                  申込合計：<span style={{fontWeight:700,color:C.gold}}>{total}名</span>
+                  {ev.recurring?"次回分の申込合計：":"申込合計："}<span style={{fontWeight:700,color:C.gold}}>{total}名</span>
                   {capacity>0&&<> / 定員 {capacity}名</>}
-                  　（{apps.length}件）
+                  　（{currentApps.length}件）
                 </div>
               </div>
               <button style={btn("blue",true)} onClick={()=>startEdit(ev)}>編集</button>
             </div>
-            {apps.length>0&&(
+            {groupEntries.length>0&&(
               <div style={{marginTop:12,borderTop:`1px solid ${C.border}`,paddingTop:10}}>
-                {apps.map(a=>(
-                  <div key={a.id} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}55`,fontSize:12,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
-                    <div><span style={{fontWeight:700}}>{a.name}</span> 様　{a.people}名　<span style={{color:C.muted}}>{a.phone}</span></div>
-                    {a.memo&&<div style={{color:C.gold}}>📝 {a.memo}</div>}
-                  </div>
-                ))}
+                {groupEntries.map(([occDate,groupApps])=>{
+                  const groupTotal=groupApps.reduce((s,a)=>s+(Number(a.people)||0),0);
+                  const isCurrent=occDate===currentOcc;
+                  return(
+                    <div key={occDate} style={{marginBottom:10}}>
+                      <div style={{fontSize:11,fontWeight:700,color:isCurrent?C.gold:C.muted,marginBottom:4}}>
+                        {occDate!=="unknown"?disp(occDate):"日程不明"}{isCurrent?"（次回）":""}　計{groupTotal}名（{groupApps.length}件）
+                      </div>
+                      {groupApps.map(a=>(
+                        <div key={a.id} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}55`,fontSize:12,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
+                          <div><span style={{fontWeight:700}}>{a.name}</span> 様　{a.people}名　<span style={{color:C.muted}}>{a.phone}</span></div>
+                          {a.memo&&<div style={{color:C.gold}}>📝 {a.memo}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1464,11 +1518,13 @@ function CustomerSiteChat({profile}){
 
 // ── 客側：教室・大会イベント一覧 ─────────────────────────
 function EventsArea({profile,eventsList,eventApps,flash}){
+  useDailyRefresh();
   const [applying,setApplying]=useState(null);
 
-  const appsFor=(eventId)=>eventApps.filter(a=>a.eventId===eventId&&a.status!=="cancelled");
-  const totalPeople=(eventId)=>appsFor(eventId).reduce((s,a)=>s+(Number(a.people)||0),0);
-  const sorted=[...eventsList].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+  const visible=eventsList.filter(ev=>!ev.closed);
+  const appsFor=(ev)=>eventApps.filter(a=>a.eventId===ev.id&&a.status!=="cancelled"&&a.occurrenceDate===eventOccurrenceDate(ev));
+  const totalPeople=(ev)=>appsFor(ev).reduce((s,a)=>s+(Number(a.people)||0),0);
+  const sorted=[...visible].sort((a,b)=>eventOccurrenceDate(a).localeCompare(eventOccurrenceDate(b)));
 
   return(
     <div>
@@ -1476,24 +1532,27 @@ function EventsArea({profile,eventsList,eventApps,flash}){
       {sorted.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:C.muted}}>現在募集中のイベントはありません</div>}
       {sorted.map(ev=>{
         const info=eventTypeInfo(ev.type);
-        const total=totalPeople(ev.id);
+        const occDate=eventOccurrenceDate(ev);
+        const total=totalPeople(ev);
         const capacity=Number(ev.capacity)||0;
         const left=capacity>0?capacity-total:null;
         const full=capacity>0&&total>=capacity;
-        const disabled=ev.closed||full;
         return(
           <div key={ev.id} style={crd}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
               <span style={bdg(info.color)}>{info.label}</span>
               <span style={{fontSize:16,fontWeight:700}}>{ev.title}</span>
-              {ev.closed&&<span style={bdg("muted")}>募集終了</span>}
-              {!ev.closed&&full&&<span style={bdg("red")}>満席</span>}
+              {ev.recurring&&<span style={bdg("blue")}>毎週{WEEKDAYS[ev.weekday]}曜</span>}
+              {full&&<span style={bdg("red")}>満席</span>}
             </div>
-            <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📅 {ev.date?disp(ev.date):"日程未定"}{ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:4}}>
+              📅 {ev.recurring?`次回 ${disp(occDate)}`:(ev.date?disp(ev.date):"日程未定")}
+              {ev.time?`　🕐 ${ev.time}〜`:""}{ev.place?`　📍 ${ev.place}`:""}
+            </div>
             {ev.description&&<div style={{fontSize:13,color:C.text,marginBottom:8,whiteSpace:"pre-wrap"}}>{ev.description}</div>}
-            {left!==null&&!ev.closed&&<div style={{fontSize:12,color:full?C.red:C.green,marginBottom:10,fontWeight:700}}>{full?"満席":`残り ${left}名`}</div>}
-            <button style={btn(disabled?"secondary":"primary")} disabled={disabled} onClick={()=>setApplying(ev)}>
-              {ev.closed?"募集終了":full?"満席":"申し込む →"}
+            {left!==null&&<div style={{fontSize:12,color:full?C.red:C.green,marginBottom:10,fontWeight:700}}>{full?"満席":`残り ${left}名`}</div>}
+            <button style={btn(full?"secondary":"primary")} disabled={full} onClick={()=>setApplying(ev)}>
+              {full?"満席":"申し込む →"}
             </button>
           </div>
         );

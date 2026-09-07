@@ -1,6 +1,15 @@
 const STORE_LINE_USER_ID = "U06ebc959d7d9eea50dc1c3f6254c0fc4";
 const TYPE_LABEL = { class: "教室", tournament: "大会" };
 
+// 今日以降で直近の指定曜日を返す（毎週くり返しイベント用）
+function nextOccurrenceDate(weekday, base = new Date()) {
+  const d = new Date(base);
+  d.setHours(0, 0, 0, 0);
+  const diff = ((Number(weekday) || 0) - d.getDay() + 7) % 7;
+  d.setDate(d.getDate() + diff);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 async function notifyStoreOnLine(typeLabel, title, name, people) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   try {
@@ -55,10 +64,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "このイベントは募集を終了しています" });
     }
 
+    const occurrenceDate = event.recurring ? nextOccurrenceDate(event.weekday) : (event.date || "");
+
     const capacity = Number(event.capacity) || 0;
     if (capacity > 0) {
       const appsSnap = await getDocs(
-        query(collection(db, "eventApplications"), where("eventId", "==", eventId), where("status", "==", "confirmed"))
+        query(
+          collection(db, "eventApplications"),
+          where("eventId", "==", eventId),
+          where("status", "==", "confirmed"),
+          where("occurrenceDate", "==", occurrenceDate)
+        )
       );
       const applied = appsSnap.docs.reduce((s, d) => s + (Number(d.data().people) || 0), 0);
       if (applied + peopleNum > capacity) {
@@ -73,6 +89,7 @@ export default async function handler(req, res) {
       people: peopleNum,
       memo: memo || "",
       status: "confirmed",
+      occurrenceDate,
       createdAt: serverTimestamp(),
     });
 
