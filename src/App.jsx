@@ -1226,12 +1226,12 @@ function AdminEvents({eventsList,eventApps,saveEvent}){
         const info=eventTypeInfo(ev.type);
         const currentOcc=eventOccurrenceDate(ev);
         const apps=appsFor(ev.id);
-        const currentApps=apps.filter(a=>a.occurrenceDate===currentOcc);
+        const currentApps=ev.recurring?apps.filter(a=>a.occurrenceDate===currentOcc):apps;
         const total=currentApps.reduce((s,a)=>s+(Number(a.people)||0),0);
         const capacity=Number(ev.capacity)||0;
         const full=capacity>0&&total>=capacity;
         const groups={};
-        apps.forEach(a=>{ const k=a.occurrenceDate||"unknown"; (groups[k]=groups[k]||[]).push(a); });
+        apps.forEach(a=>{ const k=ev.recurring?(a.occurrenceDate||"unknown"):currentOcc; (groups[k]=groups[k]||[]).push(a); });
         const groupEntries=Object.entries(groups).sort((a,b)=>b[0].localeCompare(a[0]));
         return(
           <div key={ev.id} style={{...crd,opacity:ev.closed?0.6:1}}>
@@ -1550,7 +1550,7 @@ function EventsArea({profile,eventsList,eventApps,flash}){
   const [applying,setApplying]=useState(null);
 
   const visible=eventsList.filter(ev=>!ev.closed);
-  const appsFor=(ev)=>eventApps.filter(a=>a.eventId===ev.id&&a.status!=="cancelled"&&a.occurrenceDate===eventOccurrenceDate(ev));
+  const appsFor=(ev)=>eventApps.filter(a=>a.eventId===ev.id&&a.status!=="cancelled"&&(!ev.recurring||a.occurrenceDate===eventOccurrenceDate(ev)));
   const totalPeople=(ev)=>appsFor(ev).reduce((s,a)=>s+(Number(a.people)||0),0);
   const sorted=[...visible].sort((a,b)=>eventOccurrenceDate(a).localeCompare(eventOccurrenceDate(b)));
 
