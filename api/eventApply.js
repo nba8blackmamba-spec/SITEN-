@@ -68,14 +68,17 @@ export default async function handler(req, res) {
 
     const capacity = Number(event.capacity) || 0;
     if (capacity > 0) {
-      const appsSnap = await getDocs(
-        query(
-          collection(db, "eventApplications"),
-          where("eventId", "==", eventId),
-          where("status", "==", "confirmed"),
-          where("occurrenceDate", "==", occurrenceDate)
-        )
-      );
+      // 単発イベントはそもそも日程が1つしかないため、occurrenceDateの有無に関わらず
+      // そのeventIdの申込みを全てカウントする。繰り返しイベントのみ週ごとに絞り込む。
+      const constraints = [
+        collection(db, "eventApplications"),
+        where("eventId", "==", eventId),
+        where("status", "==", "confirmed"),
+      ];
+      if (event.recurring) {
+        constraints.push(where("occurrenceDate", "==", occurrenceDate));
+      }
+      const appsSnap = await getDocs(query(...constraints));
       const applied = appsSnap.docs.reduce((s, d) => s + (Number(d.data().people) || 0), 0);
       if (applied + peopleNum > capacity) {
         return res.status(400).json({ error: "定員を超えるため申し込めません" });
