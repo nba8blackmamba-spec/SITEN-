@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, onSnapshot, setDoc, getDoc, query, orderBy } from "firebase/firestore";
+import { AdminTableBoardPanel, HeaderBoardPreview } from "./TableBoard.jsx";
 
 const SITEN_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAflBMVEX88QMPYaoAAAD+/AKko1QFY7DepyoOYq777gZhZnL76gdLdZcOYq5zkWuRdFf8swkAf3+yoTkAAP9piIwAP78AefAANn/EkEG0tAC6xTy2xEkA///Dxkf3eBzedU85Xn8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1YsZFAAAAIHRSTlP+/gAK/w3+XGP+nf+k//8OAv4B/wQFA/8D//8B/woP/3UTSsEAAAPaSURBVHjatZrZlpswDIZlbEiwIZAwWWc6ff+3rA1JMHiVUnTRTjvn6LN+yQuWoYhbD9z8xfd7KeFtUu730/9znnAA0d+W5ejccm2bHCEJRgxgvJcQtyeDAtDu+13DxMqjEL44wggIuy93jLG6WvlTrT8MjgJ8l5N7xo6zm58xAKXGf9wdRCAICAx/cs9UZY/9oQHDcDd/1k4URXHLBJz08JvJPztYLgalEyK0QcuUcGvKH4QL6N/D17bwowYhKm1CDMpbUUXRpQHW8LVdbQcPcQ1UkhVECqD9M8uWNXR0flibS1gBvpb+5wh+xNCKN64SWi7/xFsTYDX+3cL/nIOWwbAAMN+E8BAg6t+uIl0+s0QilAaHAAt91v7ZstzFO4Do8rQgQNT/cqV4DbuKjN8hQKh+3DISenqJY1VpfZSCXMIbcPb6t5Og2HA0UfzoBYkNUYJVrfBeH7z+rcXo2N6nxc6kWrTxbWLeheCdgMYLcPYDNUCGyWIFKD0J9qRZWy1yAHMaJkDflyxkK4dHyLOXSPAMoAkCnD0tz14iQVyg9Z6AsKdIIyAiED2Ep0gGcIkG8EEI3QsQDcDZFXAhgH8N+i8ijVkAM4lZyg70ECBRQh+JZEKA6Bz4VCQD6Iu0QmSReHGDLIWoIunpDOcchcgicQ55ClFFMkneZQKYINURZCpETIMs4JTtn5QGDmU+gJIGDjsEYHnYzksCDoAXSUKDAeBFwgIYPgsMadXWgHprAHpCowHYSkIDsJWEB7Dj1gCcSAQATiQKADUZSADMZGhIhOvWgOw8S9xyjZ/PZEBuCHvUlkkoJA492zQEjjm2EEKQmIMXZTqbg1e5pUbj8Z1tqJE+/JZbamSO7/2WGnENKM4b1lGR/RFIWy6mj8Ccz1hiEvgE+KKGcEinePoQ/yaGUCdrdAKQQ6hzbowM4BS7zlFkAAeecSHVtlSAfSEVvk5QQAbwzr4UDJWqiAEO8RLtcq41IQYQyesu62L24hfJ3FhTlgpZ3PgS8O2vpPHKmrDYuVfLgcvxO8CDkALP5XggDS2ERapw1/sBgggSamyDwk9Qj6lFhKghGWqxRGLQCJWbYrlsBybaXM/lQjj+gxnQEwAijbrs7e2QmmChVuMl7wwQEqhz2qVOs/Rr0SzFTWLp+ve0e8siLVOoj5nT7tX7zzkVhAgMn//JbLlf4kH4P8R9ww8+Guj716OBTP/yF/VoYMrE2Yv4e/Wqg3z2YDJxMYgmoz73WvmOE56eGMQ63Y5/M3ji05OxwXkyjDkOsX50Ah89nhn3oXJ6pbNrGnv4Ujv/Nb/pbgkH/wDdEDFg1IeT4wAAAABJRU5ErkJggg==";
 // ── 定数 ────────────────────────────────────────────────
@@ -358,7 +359,7 @@ export default function App() {
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
   const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
-  const ADMIN_TABS=[["today","今日"],["list","予約一覧"],["newbooking","予約を代行入力"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
+  const ADMIN_TABS=[["today","今日"],["board","卓状況"],["list","予約一覧"],["newbooking","予約を代行入力"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
 
   if (!dbReady) {
     return (
@@ -386,6 +387,7 @@ export default function App() {
                 <button key={k} onClick={()=>setTab(k)} style={{padding:"7px 13px",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:tab===k?C.gold:"transparent",color:tab===k?C.white:C.muted}}>{l}</button>
               ))}
               <button onClick={()=>setMode("admin")} style={{padding:"7px 13px",borderRadius:6,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:12,background:"transparent",color:C.muted,marginLeft:4}}>店舗管理</button>
+              <HeaderBoardPreview/>
             </>
           ):(
             <>
@@ -439,6 +441,7 @@ function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminNa
   // 今日以降・かつfinishedでない・cancelledでない予約のみ
   const activeRsv = rsvList.filter(r=>r.date>=todayStr&&!r.finished&&r.status!=="cancelled");
   if(tab==="today")    return <AdminToday    rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank} adminName={adminName}/>;
+  if(tab==="board")    return <AdminTableBoardPanel/>;
   if(tab==="list")     return <AdminList     rsvList={activeRsv} onCancel={onCancel} onUpdate={onUpdate} waitlistRank={waitlistRank}/>;
   if(tab==="newbooking") return <AdminBooking rsvList={rsvList} isOccupied={isOccupied} seatsLeft={seatsLeft} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate} onBook={onBook} adminName={adminName}/>;
   if(tab==="events")   return <AdminEvents   eventsList={eventsList} eventApps={eventApps} saveEvent={saveEvent}/>;

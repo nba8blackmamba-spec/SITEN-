@@ -2,5 +2,13 @@
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "crons": [
     { "path": "/api/remind", "schedule": "0 0 * * *" }
+  ],
+  "headers": [
+    {
+      "source": "/board",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors *;" }
+      ]
+    }
   ]
 }
