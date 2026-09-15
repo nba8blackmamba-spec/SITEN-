@@ -312,6 +312,10 @@ export default function App() {
     } catch(e) { console.error("LINE紐づけ取得エラー:",e); return null; }
   };
   const handleBook = async (rsv) => {
+    if(hasDuplicate(rsv.phone,rsv.date)){
+      flash(`${disp(rsv.date)}は既に同じ電話番号でのご予約があります`,false);
+      return false;
+    }
     const isStaffBooking = rsv.createdBy==="staff";
     if(!profile && !isStaffBooking) setProfile({name:rsv.name,phone:rsv.phone});
     const lineUserId = await lookupLineUserId(rsv.phone);
@@ -320,17 +324,18 @@ export default function App() {
     if(rsv.repeatWeeks>1){
       // 定期予約：複数件まとめて作成
       let list=[...rsvList];
-      let createdCount=0, waitCount=0;
+      let createdCount=0, waitCount=0, dupCount=0;
       for(let i=0;i<rsv.repeatWeeks;i++){
         const d = addDays(rsv.date, i*7);
         if(isClosedDate(d)) continue;
+        if(list.some(r=>r.phone===rsv.phone&&r.date===d&&r.status!=="cancelled")){ dupCount++; continue; }
         const left = SEATS - list.filter(r=>r.tableId===rsv.tableId&&r.date===d&&r.time===rsv.time&&r.status==="confirmed"&&!r.finished).reduce((s,r)=>s+r.people,0);
         const status = left>=rsv.people ? "confirmed" : "waitlist";
         list = [{...rsv,...lineFields,id:uid(),date:d,status,createdAt:new Date().toISOString(),memo:"",tags:rsv.tags||[],checkedIn:false,noShow:false,finished:false},...list];
         status==="confirmed" ? createdCount++ : waitCount++;
       }
       setRsvList(list);
-      flash(`定期予約：確定${createdCount}件${waitCount>0?`／待ち${waitCount}件`:""} ✓`);
+      flash(`定期予約：確定${createdCount}件${waitCount>0?`／待ち${waitCount}件`:""}${dupCount>0?`／重複のためスキップ${dupCount}件`:""} ✓`);
       notifyOwner(`【定期予約】\n予約者: ${rsv.name}\n人数: ${rsv.people}名\n日付: ${rsv.date}\n時間: ${rsv.time}\n確定: ${createdCount}件／待ち: ${waitCount}件${staffNote}`);
     } else {
       const left=seatsLeft(rsv.tableId,rsv.date,rsv.time);
@@ -1692,6 +1697,7 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
     }
     if(closed) return setErr("休業日のため予約できません");
     if(!tableId&&!forceWaitlist) return setErr("卓を選択してください");
+    if(hasDuplicate(custPhone,date)) return setErr(`${disp(date)}は既に同じ電話番号でのご予約があります`);
     setErr("");
     const tags=isBeginner?["初心者"]:[];
     const rsv={id:uid(),name:custName,phone:custPhone,people,date,time,tableId:tableId||(forceWaitlist?parseInt(showWaitlist):null),course,tags,repeatWeeks};
