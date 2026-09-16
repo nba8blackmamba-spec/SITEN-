@@ -22,6 +22,8 @@ const TABLE_TYPES = [
   { id: "rental", label: "貸卓", color: BC.orange },
 ];
 const typeInfo = (id) => TABLE_TYPES.find((t) => t.id === id) || TABLE_TYPES[0];
+// 50分カウントダウン・終了間近/時間超過の判定は「ラボ」卓のみに適用
+const isTimedType = (type) => type === "lab";
 
 // ── Firestore ヘルパー ──────────────────────────────────
 const tableRef = (n) => doc(db, "tables", String(n));
@@ -190,7 +192,8 @@ function StatBar({ waitCount, inStoreCount, emptyCount, lowTimeCount, compact })
 
 function TableRow({ table, now, compact }) {
   const playing = table.status === "playing";
-  const info = playing ? remainingInfo(table.startedAt, now) : null;
+  const timed = isTimedType(table.type);
+  const info = playing && timed ? remainingInfo(table.startedAt, now) : null;
   const soon = !!(info && info.soon);
   const overtime = !!(info && info.overtime);
   const tInfo = typeInfo(table.type);
@@ -219,15 +222,20 @@ function TableRow({ table, now, compact }) {
                 <CheckCircleIcon size={compact ? 13 : 15} />空き卓
               </div>
             )}
-            {playing && overtime && (
+            {playing && timed && overtime && (
               <span style={{ padding: "3px 10px", borderRadius: 20, background: `${BC.red}1F`, color: BC.red, fontSize: compact ? 10 : 11, fontWeight: 800 }}>
                 時間超過
               </span>
             )}
-            {playing && soon && !overtime && (
+            {playing && timed && soon && !overtime && (
               <span style={{ padding: "3px 10px", borderRadius: 20, background: `${BC.orange}2A`, color: "#B8710A", fontSize: compact ? 10 : 11, fontWeight: 800 }}>
                 終了間近
               </span>
+            )}
+            {playing && !timed && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, color: BC.blue, fontWeight: 800, fontSize: compact ? 11 : 13 }}>
+                <ClockIcon size={compact ? 13 : 15} />対局中
+              </div>
             )}
           </div>
         </div>
@@ -237,12 +245,14 @@ function TableRow({ table, now, compact }) {
             {table.memberCount > 0 && (
               <div style={{ fontSize: compact ? 10 : 11, color: BC.muted, marginTop: 4 }}>メンバー{table.memberCount}名</div>
             )}
-            <div style={{
-              fontSize: compact ? 20 : 32, fontWeight: 800, marginTop: 2, lineHeight: 1.15,
-              color: overtime ? BC.red : BC.text, fontVariantNumeric: "tabular-nums",
-            }}>
-              {overtime ? `+${formatClock(info.remainingMs)}` : formatClock(info.remainingMs)}
-            </div>
+            {timed && info && (
+              <div style={{
+                fontSize: compact ? 20 : 32, fontWeight: 800, marginTop: 2, lineHeight: 1.15,
+                color: overtime ? BC.red : BC.text, fontVariantNumeric: "tabular-nums",
+              }}>
+                {overtime ? `+${formatClock(info.remainingMs)}` : formatClock(info.remainingMs)}
+              </div>
+            )}
           </>
         )}
 
@@ -272,7 +282,7 @@ export function TableBoardPage() {
   const emptyCount = tables.filter((t) => t.status === "empty").length;
   const inStoreCount = tables.reduce((sum, t) => sum + (t.status === "playing" ? t.memberCount : 0), 0);
   const lowTimeCount = tables.filter((t) => {
-    if (t.status !== "playing") return false;
+    if (t.status !== "playing" || !isTimedType(t.type)) return false;
     const info = remainingInfo(t.startedAt, now);
     return !!(info && (info.soon || info.overtime));
   }).length;
@@ -325,7 +335,7 @@ export function AdminTableBoardPanel() {
   const emptyCount = tables.filter((t) => t.status === "empty").length;
   const inStoreCount = tables.reduce((sum, t) => sum + (t.status === "playing" ? t.memberCount : 0), 0);
   const lowTimeCount = tables.filter((t) => {
-    if (t.status !== "playing") return false;
+    if (t.status !== "playing" || !isTimedType(t.type)) return false;
     const info = remainingInfo(t.startedAt, now);
     return !!(info && (info.soon || info.overtime));
   }).length;
@@ -370,7 +380,8 @@ export function AdminTableBoardPanel() {
 function AdminTableCard({ t, now }) {
   const [pendingMembers, setPendingMembers] = useState(4);
   const playing = t.status === "playing";
-  const info = playing ? remainingInfo(t.startedAt, now) : null;
+  const timed = isTimedType(t.type);
+  const info = playing && timed ? remainingInfo(t.startedAt, now) : null;
   const soon = !!(info && info.soon);
   const overtime = !!(info && info.overtime);
   const danger = soon || overtime;
@@ -387,17 +398,17 @@ function AdminTableCard({ t, now }) {
             <CheckCircleIcon size={13} />空き卓
           </div>
         )}
-        {playing && overtime && (
+        {playing && timed && overtime && (
           <div style={{ fontSize: 12, fontWeight: 700, padding: "2px 9px", borderRadius: 20, background: `${BC.red}1F`, color: BC.red }}>
             時間超過
           </div>
         )}
-        {playing && soon && !overtime && (
+        {playing && timed && soon && !overtime && (
           <div style={{ fontSize: 12, fontWeight: 700, padding: "2px 9px", borderRadius: 20, background: `${BC.orange}2A`, color: "#B8710A" }}>
             終了間近
           </div>
         )}
-        {playing && !soon && !overtime && (
+        {playing && (!timed || (!soon && !overtime)) && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, color: BC.blue }}>
             <ClockIcon size={13} />対局中
           </div>
@@ -421,7 +432,7 @@ function AdminTableCard({ t, now }) {
           <UsersIcon size={13} />メンバー{t.memberCount}名
         </div>
       )}
-      {playing && info && (
+      {playing && timed && info && (
         <div style={{ marginTop: 6, fontSize: 26, fontWeight: 800, color: danger ? BC.red : BC.text, fontVariantNumeric: "tabular-nums" }}>
           {info.overtime ? `+${formatClock(info.remainingMs)}` : formatClock(info.remainingMs)}
         </div>
