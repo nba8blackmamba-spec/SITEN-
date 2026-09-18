@@ -30,15 +30,24 @@ const tableRef = (n) => doc(db, "tables", String(n));
 const metaRef = doc(db, "boardMeta", "main");
 
 export const startGame = (n, memberCount = 0) =>
-  setDoc(tableRef(n), { number: n, status: "playing", startedAt: new Date().toISOString(), memberCount }, { merge: true });
+  setDoc(tableRef(n), {
+    number: n, status: "playing", startedAt: new Date().toISOString(), memberCount, durationMinutes: GAME_MINUTES,
+  }, { merge: true });
 export const endGame = (n) =>
-  setDoc(tableRef(n), { number: n, status: "empty", startedAt: null, staffCount: 0, memberCount: 0 }, { merge: true });
+  setDoc(tableRef(n), { number: n, status: "empty", startedAt: null, staffCount: 0, memberCount: 0, durationMinutes: GAME_MINUTES }, { merge: true });
 export const changeStaff = (n, delta) =>
   setDoc(tableRef(n), { number: n, staffCount: increment(delta) }, { merge: true });
 export const changeWait = (delta) =>
   setDoc(metaRef, { waitCount: increment(delta) }, { merge: true });
 export const changeType = (n, type) =>
   setDoc(tableRef(n), { number: n, type }, { merge: true });
+// 残り時間を直接調整する: startedAt はそのままに、経過時間 + 指定した残り分数を
+// 「実質的な試合時間(durationMinutes)」として保存し、次回以降の計算式に反映する
+export const setRemainingMinutes = (n, startedAt, remainingMinutes) => {
+  const elapsedMinutes = (Date.now() - new Date(startedAt).getTime()) / 60000;
+  const durationMinutes = elapsedMinutes + remainingMinutes;
+  return setDoc(tableRef(n), { number: n, durationMinutes }, { merge: true });
+};
 
 // ── フック ──────────────────────────────────────────────
 function useNow(intervalMs = 1000) {
@@ -68,6 +77,7 @@ function useTables() {
       startedAt: data.startedAt || null,
       staffCount: Number(data.staffCount) || 0,
       memberCount: Number(data.memberCount) || 0,
+      durationMinutes: Number(data.durationMinutes) || GAME_MINUTES,
       type: TABLE_TYPES.some((t) => t.id === data.type) ? data.type : "health",
     };
   });
@@ -86,10 +96,10 @@ function useWaitCount() {
 }
 
 // ── 残り時間ロジック ────────────────────────────────────
-function remainingInfo(startedAt, now) {
+function remainingInfo(startedAt, now, durationMinutes = GAME_MINUTES) {
   if (!startedAt) return null;
   const startMs = new Date(startedAt).getTime();
-  const remainingMs = GAME_MINUTES * 60000 - (now - startMs);
+  const remainingMs = durationMinutes * 60000 - (now - startMs);
   return {
     remainingMs,
     overtime: remainingMs <= 0,
@@ -193,7 +203,7 @@ function StatBar({ waitCount, inStoreCount, emptyCount, lowTimeCount, compact })
 function TableRow({ table, now, compact }) {
   const playing = table.status === "playing";
   const timed = isTimedType(table.type);
-  const info = playing && timed ? remainingInfo(table.startedAt, now) : null;
+  const info = playing && timed ? remainingInfo(table.startedAt, now, table.durationMinutes) : null;
   const soon = !!(info && info.soon);
   const overtime = !!(info && info.overtime);
   const tInfo = typeInfo(table.type);
@@ -283,7 +293,7 @@ export function TableBoardPage() {
   const inStoreCount = tables.reduce((sum, t) => sum + (t.status === "playing" ? t.memberCount : 0), 0);
   const lowTimeCount = tables.filter((t) => {
     if (t.status !== "playing" || !isTimedType(t.type)) return false;
-    const info = remainingInfo(t.startedAt, now);
+    const info = remainingInfo(t.startedAt, now, t.durationMinutes);
     return !!(info && (info.soon || info.overtime));
   }).length;
 
@@ -336,7 +346,7 @@ export function AdminTableBoardPanel() {
   const inStoreCount = tables.reduce((sum, t) => sum + (t.status === "playing" ? t.memberCount : 0), 0);
   const lowTimeCount = tables.filter((t) => {
     if (t.status !== "playing" || !isTimedType(t.type)) return false;
-    const info = remainingInfo(t.startedAt, now);
+    const info = remainingInfo(t.startedAt, now, t.durationMinutes);
     return !!(info && (info.soon || info.overtime));
   }).length;
 
@@ -379,13 +389,21 @@ export function AdminTableBoardPanel() {
 
 function AdminTableCard({ t, now }) {
   const [pendingMembers, setPendingMembers] = useState(4);
+  const [remainingInput, setRemainingInput] = useState("");
   const playing = t.status === "playing";
   const timed = isTimedType(t.type);
-  const info = playing && timed ? remainingInfo(t.startedAt, now) : null;
+  const info = playing && timed ? remainingInfo(t.startedAt, now, t.durationMinutes) : null;
   const soon = !!(info && info.soon);
   const overtime = !!(info && info.overtime);
   const danger = soon || overtime;
   const tInfo = typeInfo(t.type);
+
+  const applyRemaining = () => {
+    const val = Number(remainingInput);
+    if (!Number.isFinite(val) || val < 0) return;
+    setRemainingMinutes(t.number, t.startedAt, val);
+    setRemainingInput("");
+  };
 
   return (
     <div style={{
@@ -435,6 +453,26 @@ function AdminTableCard({ t, now }) {
       {playing && timed && info && (
         <div style={{ marginTop: 6, fontSize: 26, fontWeight: 800, color: danger ? BC.red : BC.text, fontVariantNumeric: "tabular-nums" }}>
           {info.overtime ? `+${formatClock(info.remainingMs)}` : formatClock(info.remainingMs)}
+        </div>
+      )}
+      {playing && timed && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <input
+            type="number" min="0" step="1" value={remainingInput}
+            onChange={(e) => setRemainingInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && applyRemaining()}
+            placeholder="残り時間を入力(分)"
+            style={{
+              flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: 6, border: `1px solid ${BC.border}`,
+              fontSize: 12, color: BC.text, background: BC.white,
+            }}
+          />
+          <button onClick={applyRemaining} style={{
+            padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+            fontSize: 12, fontWeight: 700, background: BC.blue, color: BC.white, flexShrink: 0,
+          }}>
+            設定
+          </button>
         </div>
       )}
 
