@@ -9,7 +9,7 @@ export const GAME_MINUTES = 50;
 const TABLE_NUMBERS = [1, 2, 3, 4, 5, 6];
 
 const BC = {
-  bg: "#F0F4F8", surface: "#FFFFFF", border: "#D9E2EC", emptySurface: "#EAF8EF",
+  bg: "#F0F4F8", surface: "#FFFFFF", border: "#D9E2EC",
   text: "#1A2B3C", muted: "#7A8A9A", white: "#FFFFFF",
   blue: "#1565C0", green: "#2ECC71", red: "#E74C3C", orange: "#F5B400", purple: "#9B6BE8",
 };
@@ -124,13 +124,6 @@ const Icon = ({ children, size = 16, color = "currentColor", strokeWidth = 2 }) 
 const CheckCircleIcon = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2l4 -4" /></Icon>
 );
-// 塗りつぶし版のチェックアイコン(空き卓表示用)
-const CheckCircleFilledIcon = ({ size = 16, color = "currentColor" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: "inline-block", verticalAlign: "middle", flexShrink: 0 }}>
-    <circle cx="12" cy="12" r="10" fill={color} />
-    <path d="M8.5 12.3l2.4 2.4l4.8 -4.8" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 const ClockIcon = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></Icon>
 );
@@ -217,7 +210,7 @@ function TableRow({ table, now, compact }) {
 
   return (
     <div style={{
-      display: "flex", background: playing ? BC.surface : BC.emptySurface, border: `1px solid ${BC.border}`,
+      display: "flex", background: BC.surface, border: `1px solid ${BC.border}`,
       borderLeft: `6px solid ${tInfo.color}`, borderRadius: compact ? 8 : 10,
       boxShadow: "0 1px 3px rgba(0,0,0,0.06)", overflow: "hidden",
     }}>
@@ -225,20 +218,18 @@ function TableRow({ table, now, compact }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: compact ? 16 : 20, fontWeight: 800, color: BC.text }}>{table.number}卓</span>
-            {playing && (
-              <span style={{
-                display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 8px", borderRadius: 20,
-                fontSize: compact ? 9 : 10.5, fontWeight: 800, background: `${tInfo.color}22`, color: tInfo.color,
-              }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: tInfo.color, display: "inline-block" }} />
-                {tInfo.label}
-              </span>
-            )}
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 8px", borderRadius: 20,
+              fontSize: compact ? 9 : 10.5, fontWeight: 800, background: `${tInfo.color}22`, color: tInfo.color,
+            }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: tInfo.color, display: "inline-block" }} />
+              {tInfo.label}
+            </span>
           </div>
           <div style={{ flexShrink: 0 }}>
             {!playing && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5, color: BC.green, fontWeight: 800, fontSize: compact ? 12 : 14 }}>
-                <CheckCircleFilledIcon size={compact ? 16 : 19} />空き卓
+              <div style={{ display: "flex", alignItems: "center", gap: 4, color: BC.green, fontWeight: 800, fontSize: compact ? 11 : 13 }}>
+                <CheckCircleIcon size={compact ? 13 : 15} />空き卓
               </div>
             )}
             {playing && timed && overtime && (
@@ -416,13 +407,13 @@ function AdminTableCard({ t, now }) {
 
   return (
     <div style={{
-      background: playing ? BC.surface : BC.emptySurface, border: `1.5px solid ${danger ? BC.red : BC.border}`, borderRadius: 10, padding: 14,
+      background: BC.surface, border: `1.5px solid ${danger ? BC.red : BC.border}`, borderRadius: 10, padding: 14,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 15, fontWeight: 800 }}>{t.number}卓</div>
         {!playing && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: BC.green }}>
-            <CheckCircleFilledIcon size={17} />空き卓
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, color: BC.green }}>
+            <CheckCircleIcon size={13} />空き卓
           </div>
         )}
         {playing && timed && overtime && (
@@ -442,16 +433,14 @@ function AdminTableCard({ t, now }) {
         )}
       </div>
 
-      {playing && (
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6,
-          padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 800,
-          background: `${tInfo.color}22`, color: tInfo.color,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: tInfo.color, display: "inline-block" }} />
-          {tInfo.label}
-        </div>
-      )}
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6,
+        padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 800,
+        background: `${tInfo.color}22`, color: tInfo.color,
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: tInfo.color, display: "inline-block" }} />
+        {tInfo.label}
+      </div>
       <select value={t.type} onChange={(e) => changeType(t.number, e.target.value)} style={typeSelectStyle}>
         {TABLE_TYPES.map((tp) => <option key={tp.id} value={tp.id}>{tp.label}</option>)}
       </select>
