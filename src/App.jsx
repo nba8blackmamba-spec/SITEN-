@@ -690,6 +690,7 @@ function AdminCard({rsv,onCancel,onUpdate,rank,showCheckin}){
 function AdminCalendar({rsvList}){
   const dates=getDates();
   const [selDate,setSelDate]=useState(fmt(TODAY));
+  const [detail,setDetail]=useState(null);
   const cellColor=(date)=>{
     const c=rsvList.filter(r=>r.date===date&&r.status==="confirmed").length;
     const w=rsvList.filter(r=>r.date===date&&r.status==="waitlist").length;
@@ -730,9 +731,13 @@ function AdminCalendar({rsvList}){
                   const conf=rsvList.filter(r=>r.date===selDate&&r.time===time&&r.tableId===t.id&&r.status==="confirmed");
                   const wait=rsvList.filter(r=>r.date===selDate&&r.time===time&&r.tableId===t.id&&r.status==="waitlist");
                   const total=conf.reduce((s,r)=>s+r.people,0);
+                  const hasRsv=conf.length>0||wait.length>0;
                   return(
                     <td key={t.id} style={{padding:"3px 4px",textAlign:"center"}}>
-                      <div style={{borderRadius:5,border:`1px solid ${conf.length>0?C.green:wait.length>0?C.blue:C.border}`,background:conf.length>0?`${C.green}18`:"transparent",padding:"3px 2px",minHeight:32}}>
+                      <div
+                        onClick={()=>hasRsv&&setDetail({date:selDate,time,table:t,list:[...conf,...wait]})}
+                        style={{borderRadius:5,border:`1px solid ${conf.length>0?C.green:wait.length>0?C.blue:C.border}`,background:conf.length>0?`${C.green}18`:"transparent",padding:"3px 2px",minHeight:32,cursor:hasRsv?"pointer":"default"}}
+                      >
                         {conf.length===0&&wait.length===0?<span style={{color:C.border}}>―</span>:<>
                           {conf.length>0&&<div style={{fontWeight:700,color:C.green,fontSize:11}}>{total}名</div>}
                           {wait.length>0&&<div style={{fontSize:9,color:C.blue}}>{wait.length}人待</div>}
@@ -751,9 +756,43 @@ function AdminCalendar({rsvList}){
         <span><span style={{color:C.blue}}>■</span> 待ちあり</span>
         <span><span style={{color:C.orange}}>■</span> 両方あり</span>
       </div>
+      {detail&&<ReservationDetailModal detail={detail} onClose={()=>setDetail(null)}/>}
     </div>
   );
 }
+
+function ReservationDetailModal({detail,onClose}){
+  const {date,time,table,list}=detail;
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}} onClick={onClose}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:26,maxWidth:420,width:"90%",boxSizing:"border-box",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{...tag,marginBottom:4}}>予約詳細</div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:16}}>{disp(date)} {time}〜　{table.label}</div>
+        {list.map((r,i)=>{
+          const course=COURSES.find(c=>c.id===r.course);
+          return(
+            <div key={r.id||i} style={{...crd,marginBottom:i===list.length-1?0:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontWeight:700,fontSize:15}}>{r.name} 様</div>
+                {r.status==="waitlist"&&<span style={{fontSize:11,fontWeight:700,color:C.blue}}>キャンセル待ち</span>}
+              </div>
+              <div style={{fontSize:13,color:C.text,display:"flex",flexDirection:"column",gap:4}}>
+                <div><span style={lbl2}>電話番号</span>{r.phone}</div>
+                <div><span style={lbl2}>人数</span>{r.people}名</div>
+                <div><span style={lbl2}>コース</span>{course?course.label:r.course}</div>
+                <div><span style={lbl2}>時間</span>{r.time}〜</div>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+          <button style={btn("secondary")} onClick={onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+const lbl2 = {display:"inline-block",width:64,color:C.muted,fontSize:11};
 
 // ── 管理：売上集計 ───────────────────────────────────────
 function AdminSales({rsvList}){
