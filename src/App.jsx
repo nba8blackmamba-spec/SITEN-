@@ -691,6 +691,7 @@ function AdminCalendar({rsvList}){
   const dates=getDates();
   const [selDate,setSelDate]=useState(fmt(TODAY));
   const [detail,setDetail]=useState(null);
+  const [showDayList,setShowDayList]=useState(false);
   const cellColor=(date)=>{
     const c=rsvList.filter(r=>r.date===date&&r.status==="confirmed").length;
     const w=rsvList.filter(r=>r.date===date&&r.status==="waitlist").length;
@@ -714,7 +715,10 @@ function AdminCalendar({rsvList}){
           );
         })}
       </div>
-      <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>{disp(selDate)} の予約状況</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:14,fontWeight:700}}>{disp(selDate)} の予約状況</div>
+        <button style={btn("secondary",true)} onClick={()=>setShowDayList(true)}>全予約を一覧表示</button>
+      </div>
       <div style={{overflowX:"auto"}}>
         <table style={{borderCollapse:"collapse",width:"100%",fontSize:12}}>
           <thead>
@@ -757,6 +761,59 @@ function AdminCalendar({rsvList}){
         <span><span style={{color:C.orange}}>■</span> 両方あり</span>
       </div>
       {detail&&<ReservationDetailModal detail={detail} onClose={()=>setDetail(null)}/>}
+      {showDayList&&<DayReservationListModal date={selDate} rsvList={rsvList} onClose={()=>setShowDayList(false)}/>}
+    </div>
+  );
+}
+
+function DayReservationListModal({date,rsvList,onClose}){
+  const list=useMemo(()=>{
+    return rsvList
+      .filter(r=>r.date===date&&(r.status==="confirmed"||r.status==="waitlist"))
+      .slice()
+      .sort((a,b)=>a.time!==b.time?a.time.localeCompare(b.time):a.tableId-b.tableId);
+  },[rsvList,date]);
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}} onClick={onClose}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:26,maxWidth:640,width:"92%",boxSizing:"border-box",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{...tag,marginBottom:4}}>全予約一覧</div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:16}}>{disp(date)}　全{list.length}件</div>
+        {list.length===0?
+          <div style={{textAlign:"center",padding:"30px 0",color:C.muted}}>この日の予約はありません</div>
+        :
+          <div style={{overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",width:"100%",fontSize:12,minWidth:520}}>
+              <thead>
+                <tr>
+                  {["時間","卓","予約者名","電話番号","人数","コース",""].map(h=>
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:C.muted,fontWeight:600,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap"}}>{h}</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r,i)=>{
+                  const table=TABLES.find(t=>t.id===r.tableId);
+                  const course=COURSES.find(c=>c.id===r.course);
+                  return(
+                    <tr key={r.id||i} style={{borderBottom:`1px solid ${C.border}22`}}>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{r.time}</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{table?table.label:r.tableId}</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{r.name} 様</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{r.phone}</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{r.people}名</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{course?course.label:r.course}</td>
+                      <td style={{padding:"6px 8px",whiteSpace:"nowrap"}}>{r.status==="waitlist"&&<span style={{fontSize:11,fontWeight:700,color:C.blue}}>キャンセル待ち</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        }
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+          <button style={btn("secondary")} onClick={onClose}>閉じる</button>
+        </div>
+      </div>
     </div>
   );
 }
