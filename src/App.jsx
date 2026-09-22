@@ -47,11 +47,21 @@ const nextOccurrenceDate = (weekday) => {
 const eventOccurrenceDate = (ev) => ev.recurring ? nextOccurrenceDate(ev.weekday) : ev.date;
 // 日付が変わったら毎週くり返しイベントの次回開催日を再計算させるための強制再描画
 const useDailyRefresh = () => {
-  const [,setTick] = useState(0);
+  const [tick,setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick(x=>x+1), 60000);
     return () => clearInterval(timer);
   }, []);
+  return tick;
+};
+// 予約の受付締め切り（開始1時間前）── 当日分の時間枠から、締め切りを過ぎた枠を除外する
+const BOOKING_CUTOFF_MIN = 60;
+const timeToMinutes = (t) => { const [h,m]=t.split(":").map(Number); return h*60+m; };
+const availableTimeSlots = (date) => {
+  if(date!==fmt(TODAY)) return TIME_SLOTS;
+  const now=new Date();
+  const cutoff=now.getHours()*60+now.getMinutes()+BOOKING_CUTOFF_MIN;
+  return TIME_SLOTS.filter(t=>timeToMinutes(t)>=cutoff);
 };
 
 // ── バリデーション ──────────────────────────────────────
@@ -1775,7 +1785,8 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
   const [nameErr,setNameErr]=useState("");
   const [phoneErr,setPhoneErr]=useState("");
   const [people,setPeople]=useState(1); const [date,setDate]=useState(fmt(TODAY));
-  const [time,setTime]=useState("12:30"); const [tableId,setTableId]=useState(null);
+  const [time,setTime]=useState(()=>availableTimeSlots(fmt(TODAY))[0]||TIME_SLOTS[0]);
+  const [tableId,setTableId]=useState(null);
   const [course,setCourse]=useState("health"); const [err,setErr]=useState("");
   const [showWaitlist,setShowWaitlist]=useState(false);
   const [isBeginner,setIsBeginner]=useState(false);
@@ -1786,6 +1797,11 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
   const closed=isClosedDate(date);
   const custName=staffMode?name.trim():profile.name;
   const custPhone=staffMode?phone.trim():profile.phone;
+  const minuteTick=useDailyRefresh();
+  const timeSlots=useMemo(()=>availableTimeSlots(date),[date,minuteTick]);
+  useEffect(()=>{
+    if(timeSlots.length>0&&!timeSlots.includes(time)) setTime(timeSlots[0]);
+  },[timeSlots]);
   const dup=custPhone?hasDuplicate(custPhone,date):false;
 
   const submit=(forceWaitlist=false)=>{
@@ -1795,6 +1811,7 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
       if(ne||pe){ setNameErr(ne||""); setPhoneErr(pe||""); return; }
     }
     if(closed) return setErr("休業日のため予約できません");
+    if(!availableTimeSlots(date).includes(time)) return setErr("ご選択の時間は受付を終了しました。別の時間をお選びください");
     if(!tableId&&!forceWaitlist) return setErr("卓を選択してください");
     if(hasDuplicate(custPhone,date)) return setErr(`${disp(date)}は既に同じ電話番号でのご予約があります`);
     setErr("");
@@ -1858,9 +1875,18 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
       <div style={crd}>
         <div style={rw}>
           <div style={{flex:2,minWidth:130}}><span style={lbl}>日付</span><input type="date" style={inp} value={date} min={fmt(TODAY)} max={maxDate()} onChange={e=>{setDate(e.target.value);reset();}}/></div>
-          <div style={{flex:1,minWidth:100}}><span style={lbl}>時間</span><select style={sel} value={time} onChange={e=>{setTime(e.target.value);reset();}}>{TIME_SLOTS.map(t=><option key={t}>{t}</option>)}</select></div>
+          <div style={{flex:1,minWidth:100}}>
+            <span style={lbl}>時間</span>
+            {timeSlots.length>0
+              ? <select style={sel} value={time} onChange={e=>{setTime(e.target.value);reset();}}>{timeSlots.map(t=><option key={t}>{t}</option>)}</select>
+              : <div style={{...inp,color:C.red}}>受付終了</div>
+            }
+          </div>
           <div style={{minWidth:90}}><span style={lbl}>人数</span><select style={sel} value={people} onChange={e=>setPeople(Number(e.target.value))}>{[1,2,3,4].map(n=><option key={n} value={n}>{n}名</option>)}</select></div>
         </div>
+        {date===fmt(TODAY)&&timeSlots.length===0&&(
+          <div style={{marginTop:8,fontSize:12,color:C.red}}>本日のご予約受付は終了しました（開始1時間前まで受付）。別の日付をお選びください</div>
+        )}
       </div>
 
       <div style={crd}>
@@ -1877,8 +1903,8 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
       </div>
 
       <div style={crd}>
-        <span style={lbl}>卓を選択 — {disp(date)} {time}〜　（卓を長押しで予約者を確認できます）</span>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,opacity:closed?0.4:1,pointerEvents:closed?"none":"auto"}}>
+        <span style={lbl}>卓を選択 — {disp(date)} {timeSlots.length>0?`${time}〜`:"受付終了"}　（卓を長押しで予約者を確認できます）</span>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,opacity:(closed||timeSlots.length===0)?0.4:1,pointerEvents:(closed||timeSlots.length===0)?"none":"auto"}}>
           {TABLES.map(t=>{
             const left=seatsLeft(t.id,date,time); const occ=left<=0;
             const col=occ?C.red:left<=1?"#E8A84C":C.green;
