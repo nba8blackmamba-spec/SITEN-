@@ -1,7 +1,7 @@
 // 対局の入力・編集・削除
 import { useMemo, useState } from "react";
 import { RULES, RULE_IDS, SEAT_WINDS, computeGame, checkTotal, autoAdjust, fmtPoint, CHOMBO_PENALTY } from "./scoring";
-import { saveGame, deleteGame, restoreGame, loadStaffName } from "./store";
+import { saveGame, deleteGame, restoreGame, saveErrorMessage } from "./store";
 import { HistoryDialog } from "./History";
 import { PlayerPicker } from "./PlayerPicker";
 import { SC, F, card, label, input, bigBtn, pointColor } from "./ui";
@@ -54,7 +54,7 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, flash 
       seats: f.seats.map((s, i) => ({ ...s, input: String(next[i] / 100) })),
       adjustment: {
         ...adjustment, wind: SEAT_WINDS[adjustment.seat], playerName: f.seats[adjustment.seat].player?.name || "",
-        at: new Date().toISOString(), by: loadStaffName(),
+        at: new Date().toISOString(), // 担当者名は保存時に入れる
       },
     }));
     flash(`${SEAT_WINDS[adjustment.seat]}家を ${adjustment.amount > 0 ? "+" : ""}${fmtScore(adjustment.amount)}点 調整しました`);
@@ -78,12 +78,12 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, flash 
       await deleteGame(g.id);
       if (form.id === g.id) setForm(newForm(form.round, form.table));
       flash("削除しました");
-    } catch (e) { console.error(e); flash("削除できませんでした", false); }
+    } catch (e) { console.error(e); flash(saveErrorMessage(e, "削除できませんでした"), false); }
   };
 
   const restore = async (g) => {
     try { await restoreGame(g.id); flash("元に戻しました ✓"); }
-    catch (e) { console.error(e); flash("元に戻せませんでした", false); }
+    catch (e) { console.error(e); flash(saveErrorMessage(e, "元に戻せませんでした"), false); }
   };
 
   const save = async () => {
@@ -114,7 +114,7 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, flash 
       setForm(form.id ? newForm(form.round, form.table) : newForm(form.round + 1, form.table, form.seats.map((s) => s.player)));
       setActive(0);
     } catch (e) {
-      console.error(e); flash("保存できませんでした", false);
+      console.error(e); flash(saveErrorMessage(e, "保存できませんでした"), false);
     } finally { setBusy(false); }
   };
 

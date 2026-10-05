@@ -5,7 +5,7 @@
 // ════════════════════════════════════════════════════════
 import { useState } from "react";
 import { useStaffAuth, staffSignIn, staffSignOut, authErrorMessage } from "./auth";
-import { usePlayers, useGamesOfDate, loadStaffName, saveStaffName } from "./store";
+import { usePlayers, useGamesOfDate, loadStaffName, saveStaffName, isEmailLike } from "./store";
 import { GameEntry } from "./GameEntry";
 import { DailyResults } from "./DailyResults";
 import { SC, F, card, label, input, bigBtn, todayStr } from "./ui";
@@ -75,8 +75,9 @@ function SeisekiAdmin({ email }) {
         <div style={{ flex: 1 }} />
         <label style={{ fontSize: 14, color: SC.muted, display: "flex", alignItems: "center", gap: 6 }}>
           担当
-          <input style={{ ...input, width: 130, minHeight: 44, fontSize: 16 }} value={staffName} placeholder="名前" onChange={(e) => setStaffName(e.target.value)} />
+          <input style={{ ...input, width: 130, minHeight: 44, fontSize: 16, ...(isEmailLike(staffName) ? { borderColor: SC.red } : {}) }} value={staffName} placeholder="名前" onChange={(e) => setStaffName(e.target.value)} />
         </label>
+        {isEmailLike(staffName) && <span style={{ fontSize: 13, color: SC.red, fontWeight: 700 }}>メールアドレスではなく名前を入れてください</span>}
         <button style={{ ...bigBtn("plain"), color: SC.red, borderColor: `${SC.red}66`, fontSize: 15 }} onClick={logout} title={email}>ログアウト</button>
       </header>
       <main style={{ maxWidth: 1180, margin: "0 auto", padding: "16px 16px 60px" }}>

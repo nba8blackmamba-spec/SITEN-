@@ -40,6 +40,11 @@ service cloud.firestore {
         && getAfter(seisekiHistoryPath(hid)).data.uid == request.auth.uid;
     }
 
+    // 誰でも読める文書に、メールアドレスらしき文字列（@ を含む）を入れさせない
+    function noEmail(v) {
+      return v == null || (v is string && !v.matches('.*@.*'));
+    }
+
     // スタッフの登録（Firebaseコンソールからだけ追加・削除する）
     match /seisekiStaff/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
@@ -62,7 +67,8 @@ service cloud.firestore {
       return d.keys().hasOnly(['regNo', 'name', 'kana', 'createdAt', 'updatedAt', 'lastHistoryId'])
         && d.regNo is int && d.regNo > 0
         && d.name is string && d.name.size() > 0 && d.name.size() <= 40
-        && d.kana is string && d.kana.size() <= 60;
+        && d.kana is string && d.kana.size() <= 60
+        && noEmail(d.name) && noEmail(d.kana);
     }
 
     // 対局（削除は「削除済み」の印で行う。本当の削除は禁止）
@@ -80,7 +86,11 @@ service cloud.firestore {
         && d.rule in ['kenko', 'lab', 'kyokai']
         && d.round is int && d.table is int
         && d.seats is list && d.seats.size() == 4
-        && d.deleted is bool;
+        && d.deleted is bool
+        && d.createdBy is string && noEmail(d.createdBy)
+        && d.updatedBy is string && noEmail(d.updatedBy)
+        && noEmail(d.deletedBy)
+        && (d.adjustment == null || noEmail(d.adjustment.get('by', null)));
     }
 
     // 健康の日別チェック（役満和了・指定役）
@@ -101,6 +111,7 @@ service cloud.firestore {
         && request.resource.data.target in ['players', 'games', 'dailyFlags']
         && request.resource.data.action in ['create', 'update', 'delete', 'restore']
         && request.resource.data.uid == request.auth.uid
+        && noEmail(request.resource.data.staffName)
         && request.resource.data.at == request.time;
       allow update, delete: if false;
     }

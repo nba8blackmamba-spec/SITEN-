@@ -29,10 +29,21 @@ const STAFF_NAME_KEY = "siten_seiseki_staff_name";
 export const loadStaffName = () => { try { return localStorage.getItem(STAFF_NAME_KEY) || ""; } catch { return ""; } };
 export const saveStaffName = (v) => { try { localStorage.setItem(STAFF_NAME_KEY, v); } catch { /* 保存できなくても続行 */ } };
 
+// 誰でも読める games に入れる担当者名。メールアドレスは入れない（メールは履歴 seisekiHistory にだけ残す）
+export class StaffNameError extends Error {}
+export const isEmailLike = (s) => String(s || "").includes("@");
+const publicStaffName = () => {
+  const name = loadStaffName().trim();
+  if (isEmailLike(name)) throw new StaffNameError("担当欄にはメールアドレスではなく名前を入れてください");
+  return name.slice(0, 30);
+};
+// 画面に出すエラーメッセージ
+export const saveErrorMessage = (e, fallback) => (e instanceof StaffNameError ? e.message : fallback);
+
 const actor = () => {
   const u = auth.currentUser;
   if (!u) throw new Error("ログインしていません");
-  return { uid: u.uid, email: u.email || "", staffName: loadStaffName() };
+  return { uid: u.uid, email: u.email || "", staffName: publicStaffName() };
 };
 
 // 本体を after の内容で上書きし、同じトランザクションで履歴を1件追加する
@@ -111,8 +122,9 @@ export async function createPlayer(players, { name, kana }) {
   });
 }
 
-export const saveGame = (id, game) => runTransaction(db, async (tx) => {
-  const by = loadStaffName();
+export const saveGame = (id, rawGame) => runTransaction(db, async (tx) => {
+  const by = publicStaffName();
+  const game = { ...rawGame, adjustment: rawGame.adjustment ? { ...rawGame.adjustment, by } : null };
   if (!id) {
     const ref = doc(gamesCol);
     writeWithHistory(tx, {
@@ -136,7 +148,7 @@ const setGameDeleted = (id, deleted) => runTransaction(db, async (tx) => {
   const ref = doc(gamesCol, id);
   const snap = await tx.get(ref);
   if (!snap.exists()) throw new Error("対局が見つかりません");
-  const by = loadStaffName();
+  const by = publicStaffName();
   writeWithHistory(tx, {
     target: "games", ref, action: deleted ? "delete" : "restore", before: snap.data(),
     after: {

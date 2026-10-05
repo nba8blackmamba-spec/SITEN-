@@ -1,7 +1,7 @@
 // 日別成績（日付・ルールごと。ルールは混ぜない）
 import { useMemo, useState } from "react";
 import { RULES, RULE_IDS, computeDaily, fmtPoint } from "./scoring";
-import { useDailyFlags, setDailyFlag } from "./store";
+import { useDailyFlags, setDailyFlag, saveErrorMessage } from "./store";
 import { SC, card, label, input, bigBtn, pointColor } from "./ui";
 
 const th = { padding: "10px 10px", fontSize: 15, color: SC.muted, fontWeight: 700, borderBottom: `2px solid ${SC.border}`, whiteSpace: "nowrap", textAlign: "right" };
@@ -28,7 +28,7 @@ export function DailyResults({ date, setDate, rule, setRule, games, players, fla
     const k = [date, rule, playerId, field].join("|");
     setPending((p) => ({ ...p, [k]: value }));
     setDailyFlag(date, rule, playerId, field, value)
-      .catch((e) => { console.error(e); flash("保存できませんでした", false); })
+      .catch((e) => { console.error(e); flash(saveErrorMessage(e, "保存できませんでした"), false); })
       .finally(() => setPending(({ [k]: _done, ...rest }) => rest));
   };
 

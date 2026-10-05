@@ -104,6 +104,19 @@ test("名簿: 個人情報の項目は入れられない／登録番号は文書
   await denied(deleteDoc(doc(staff.db, "players/1")));
 });
 
+test("誰でも読める games・players にメールアドレスは入れられない（履歴には残せる）", async () => {
+  await denied(writeWithHistory(staff, "games/m1", game({ createdBy: "staff@example.com" }), { target: "games" }));
+  await denied(writeWithHistory(staff, "games/m1", game({ updatedBy: "a@b" }), { target: "games" }));
+  await denied(writeWithHistory(staff, "games/m1", game({ deleted: true, deletedBy: "a@b" }), { target: "games" }));
+  await denied(writeWithHistory(staff, "games/m1", game({ adjustment: { seat: 3, by: "a@b" } }), { target: "games" }));
+  await denied(writeWithHistory(staff, "players/7", player(7, { name: "a@b" }), { target: "players" }));
+  await denied(writeWithHistory(staff, "games/m1", game(), { target: "games", historyOverride: { staffName: "a@b" } }));
+  await writeWithHistory(staff, "games/m1", game({ createdBy: "店長", adjustment: { seat: 3, by: "店長" } }),
+    { target: "games", historyOverride: { email: "staff@example.com" } });
+  const h = await getDocs(query(collection(staff.db, "seisekiHistory"), where("docId", "==", "m1")));
+  assert.equal(h.docs[0].data().email, "staff@example.com");
+});
+
 test("対局: ルール名・席数・項目をチェックする", async () => {
   await denied(writeWithHistory(staff, "games/g6", game({ rule: "other" }), { target: "games" }));
   await denied(writeWithHistory(staff, "games/g6", game({ seats: [seat(1)] }), { target: "games" }));

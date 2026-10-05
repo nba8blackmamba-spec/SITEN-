@@ -73,27 +73,48 @@
 - または、ルール編集画面の左側にある **変更履歴** から以前のバージョンを選んで戻す
 - 元に戻すと、成績の書き込みは A の場合は拒否され、B の場合は誰でも書ける状態に戻ります（予約などの既存機能は元どおり動きます）
 
-## 4. 毎日の自動バックアップを設定する（Vercel）
+## 4. 毎日の自動バックアップを設定する（Vercel Blob・Private）
 
 毎日 日本時間 4時台に、成績データ（名簿・対局・日別チェック・変更履歴）を1つの JSON ファイルにまとめて
 Vercel Blob に保存します。90日を過ぎたファイルは自動で消します。
 
+バックアップには変更履歴（スタッフのメールアドレスを含む）が入るため、**Private のストアにだけ保存します**。
+Private のファイルは URL を知っていても読めず、Vercel のダッシュボードか、トークンを持つプログラムからしか取り出せません。
+コードは常に Private を指定して保存し、Public を指定する設定は持たせていません。ストアを Public で作ってしまった場合は保存がエラーになる見込みです（下の 8 で必ず確認してください）。
+
 1. Vercel のダッシュボードで、このサイトのプロジェクトを開く
-2. 「Storage」→「Create Database」（または「Create」）→ **Blob** を選んで作成
-   - アクセス方式を選べる場合は **Private** を選ぶ
-   - 作成後、このプロジェクトに接続（Connect）する。環境変数 `BLOB_READ_WRITE_TOKEN` が自動で追加されます
-3. 「Settings」→「Environment Variables」に追加（Production）
+2. 「Storage」→「Create Database」（または「Create」）→ **Blob** を選ぶ
+3. 作成画面でアクセス方式（Access）に **Private** を選んで作成する
+   - ストアのアクセス方式は、あとから変えられない可能性があります。迷ったら作り直してください
+4. 作成後、このプロジェクトに接続（Connect）する。環境変数 `BLOB_READ_WRITE_TOKEN` が自動で追加されます
+5. 「Settings」→「Environment Variables」に追加（Production）
    - `SEISEKI_BACKUP_EMAIL` … 手順1で作ったアカウントのメールアドレス
    - `SEISEKI_BACKUP_PASSWORD` … 同パスワード
-   - Blob ストアを Public で作った場合のみ: `SEISEKI_BACKUP_ACCESS` = `public`
    - （任意）保存日数を変える場合: `SEISEKI_BACKUP_KEEP_DAYS` = 日数（既定 90）
    - `FIREBASE_API_KEY` と `CRON_SECRET` は既存のものをそのまま使います
-4. 再デプロイ（Deployments → 最新 → Redeploy）
-5. 「Settings」→「Cron Jobs」で `/api/seisekiBackup` が表示されていることを確認し、「Run」で1回手動実行
-6. 「Storage」→ 作った Blob →「Browser」に `seiseki-backups/seiseki-日付-xxxx.json` ができていれば完了
+6. 再デプロイ（Deployments → 最新 → Redeploy）
+7. 「Settings」→「Cron Jobs」で `/api/seisekiBackup` が表示されていることを確認し、「Run」で1回手動実行
+8. 「Storage」→ 作った Blob →「Browser」に `seiseki-backups/seiseki-日付-xxxx.json` ができていれば完了
+   - ファイルができていない場合は「Logs」で `成績バックアップエラー` を探し、内容を送ってください
 
 ※ パスワードを変更したときは、`SEISEKI_BACKUP_PASSWORD` も変更して再デプロイしてください。
 ※ Vercel のプランによって Cron の数や Blob の無料枠に上限があります。デプロイ時に Cron の数のエラーが出た場合は連絡してください。
+
+### 作成画面で Private を選べない場合
+
+Private のストアは Vercel Blob では比較的新しい機能のため、アカウントやプランによってはまだ選べないことがあります（使っているライブラリは Private に対応済みです）。
+その場合は Public で作らず、次のどれかにします。決めていただければ対応します。
+
+- **A. Firebase の公式バックアップ（おすすめ）**
+  Firestore の「スケジュールバックアップ」を毎日にします。データは Google Cloud の中にだけ置かれ、公開されません。
+  Firebase を従量課金（Blaze）プランにする必要があります（このデータ量なら費用はごく小さい見込みですが、料金はコンソールで確認してください）。
+  この場合、Vercel 側のバックアップ（`/api/seisekiBackup`）は使わないので、`vercel.json` の Cron 1行を外します。
+- **B. 暗号化してから保存する**
+  バックアップをパスワード（環境変数に置く鍵）で暗号化してから Public ストアに保存します。URL が漏れても中身は読めません。
+  鍵をなくすと復元できなくなるので、鍵の保管が必要です。
+- **C. 履歴をバックアップに入れない**
+  バックアップは名簿・対局・日別チェック（もともと公開しているデータ）だけにし、履歴は Firestore の中だけに残します
+  （履歴はルールで書き換え・削除ができないため、Firestore 内では守られています）。手軽ですが、Firestore 全体を失った場合は履歴も失います。
 
 ## 復元について
 

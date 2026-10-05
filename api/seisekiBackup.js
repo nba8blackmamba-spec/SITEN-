@@ -1,6 +1,8 @@
 // ════════════════════════════════════════════════════════
 // 麻雀成績の毎日の自動バックアップ（Vercel Cron から呼ばれる）
-// players / games / dailyFlags / seisekiHistory を1つのJSONにまとめ、Vercel Blob に保存する。
+// players / games / dailyFlags / seisekiHistory を1つのJSONにまとめ、Vercel Blob（Private ストア）に保存する。
+// 履歴にはスタッフのメールアドレスが入るため、公開URLで読める形（Public）では保存しない。
+// ストアが Public だと保存に失敗し、エラーとして記録される（公開状態で保存されることはない）。
 // 古いバックアップは SEISEKI_BACKUP_KEEP_DAYS 日（既定90日）を過ぎたら消す。
 //
 // 必要な環境変数（Vercel の Settings → Environment Variables）
@@ -8,8 +10,7 @@
 //   CRON_SECRET               … 既存のものをそのまま使う
 //   SEISEKI_BACKUP_EMAIL      … 成績スタッフ用アカウントのメールアドレス（履歴を読むため）
 //   SEISEKI_BACKUP_PASSWORD   … 同パスワード
-//   BLOB_READ_WRITE_TOKEN     … Vercel Blob のストアをプロジェクトにつなぐと自動で入る
-//   SEISEKI_BACKUP_ACCESS     … （任意）Blob ストアが Public の場合だけ "public" を指定。既定は "private"
+//   BLOB_READ_WRITE_TOKEN     … Vercel Blob の Private ストアをプロジェクトにつなぐと自動で入る
 // ════════════════════════════════════════════════════════
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
@@ -61,9 +62,8 @@ export default async function handler(req, res) {
     }
     const backup = await collectBackup(getFirestore(app));
 
-    const access = process.env.SEISEKI_BACKUP_ACCESS === "public" ? "public" : "private";
     const saved = await put(`${PREFIX}seiseki-${jstDate()}.json`, JSON.stringify(backup), {
-      access, addRandomSuffix: true, contentType: "application/json",
+      access: "private", addRandomSuffix: true, contentType: "application/json",
     });
 
     // 保存期間を過ぎた古いバックアップを消す
