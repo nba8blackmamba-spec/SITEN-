@@ -1,5 +1,5 @@
 // 日別成績（日付・ルールごと。ルールは混ぜない）
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { RULES, RULE_IDS, computeDaily, fmtPoint } from "./scoring";
 import { useDailyFlags, setDailyFlag } from "./store";
 import { SC, card, label, input, bigBtn, pointColor } from "./ui";
@@ -9,13 +9,28 @@ const td = { padding: "12px 10px", fontSize: 18, borderBottom: `1px solid ${SC.b
 const fmtP = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
 
 export function DailyResults({ date, setDate, rule, setRule, games, players, flash }) {
-  const flags = useDailyFlags(date, rule);
+  const savedFlags = useDailyFlags(date, rule);
+  // 保存が終わるまでの間も、押したチェックをすぐ画面に出す
+  const [pending, setPending] = useState({});
+  const flags = useMemo(() => {
+    const merged = { ...savedFlags };
+    for (const [k, v] of Object.entries(pending)) {
+      const [d, r, pid, f] = k.split("|");
+      if (d === date && r === rule) merged[pid] = { ...(merged[pid] || {}), [f]: v };
+    }
+    return merged;
+  }, [savedFlags, pending, date, rule]);
   const { rounds, rows } = useMemo(() => computeDaily(rule, games, flags), [rule, games, flags]);
   const nameOf = (r) => players.find((p) => p.id === r.playerId)?.name || r.name;
   const bonus = RULES[rule].dailyBonus;
 
-  const toggle = (playerId, field, value) =>
-    setDailyFlag(date, rule, playerId, field, value).catch((e) => { console.error(e); flash("保存できませんでした", false); });
+  const toggle = (playerId, field, value) => {
+    const k = [date, rule, playerId, field].join("|");
+    setPending((p) => ({ ...p, [k]: value }));
+    setDailyFlag(date, rule, playerId, field, value)
+      .catch((e) => { console.error(e); flash("保存できませんでした", false); })
+      .finally(() => setPending(({ [k]: _done, ...rest }) => rest));
+  };
 
   return (
     <div>

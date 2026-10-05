@@ -1,7 +1,8 @@
 {
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "crons": [
-    { "path": "/api/remind", "schedule": "0 0 * * *" }
+    { "path": "/api/remind", "schedule": "0 0 * * *" },
+    { "path": "/api/seisekiBackup", "schedule": "0 19 * * *" }
   ],
   "headers": [
     {

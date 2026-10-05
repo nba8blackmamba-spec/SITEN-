@@ -1,7 +1,8 @@
 // 対局の入力・編集・削除
 import { useMemo, useState } from "react";
 import { RULES, RULE_IDS, SEAT_WINDS, computeGame, checkTotal, autoAdjust, fmtPoint, CHOMBO_PENALTY } from "./scoring";
-import { saveGame, deleteGame } from "./store";
+import { saveGame, deleteGame, restoreGame, loadStaffName } from "./store";
+import { HistoryDialog } from "./History";
 import { PlayerPicker } from "./PlayerPicker";
 import { SC, F, card, label, input, bigBtn, pointColor } from "./ui";
 
@@ -14,16 +15,19 @@ const newForm = (round = 1, table = 1, players = [null, null, null, null]) => ({
 const toScore = (s) => (/^-?\d+$/.test(s) ? Number(s) * 100 : null);
 const fmtScore = (n) => n.toLocaleString("ja-JP");
 
-export function GameEntry({ date, setDate, rule, setRule, players, games, staffName, flash }) {
+export function GameEntry({ date, setDate, rule, setRule, players, games, flash }) {
   const [form, setForm] = useState(() => newForm());
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [historyOf, setHistoryOf] = useState(null);
 
   const scores = form.seats.map((s) => toScore(s.input));
   const allScored = scores.every((s) => s !== null);
   const results = allScored ? computeGame(rule, scores, form.seats.map((s) => s.chombo)) : null;
   const total = allScored ? checkTotal(rule, scores) : null;
-  const ruleGames = useMemo(() => games.filter((g) => g.rule === rule), [games, rule]);
+  const ruleGames = useMemo(() => games.filter((g) => g.rule === rule && !g.deleted), [games, rule]);
+  const deletedGames = useMemo(() => games.filter((g) => g.rule === rule && g.deleted), [games, rule]);
 
   const updateSeat = (i, patch) => setForm((f) => ({
     ...f, seats: f.seats.map((s, j) => (j === i ? { ...s, ...patch } : s)),
@@ -50,7 +54,7 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, staffN
       seats: f.seats.map((s, i) => ({ ...s, input: String(next[i] / 100) })),
       adjustment: {
         ...adjustment, wind: SEAT_WINDS[adjustment.seat], playerName: f.seats[adjustment.seat].player?.name || "",
-        at: new Date().toISOString(), by: staffName || "",
+        at: new Date().toISOString(), by: loadStaffName(),
       },
     }));
     flash(`${SEAT_WINDS[adjustment.seat]}家を ${adjustment.amount > 0 ? "+" : ""}${fmtScore(adjustment.amount)}点 調整しました`);
@@ -69,12 +73,17 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, staffN
   };
 
   const remove = async (g) => {
-    if (!window.confirm(`${g.round}回戦 ${g.table}卓 の記録を削除します。よろしいですか？`)) return;
+    if (!window.confirm(`${g.round}回戦 ${g.table}卓 の記録を削除します。よろしいですか？\n（削除済みとして残るので、あとで元に戻せます）`)) return;
     try {
       await deleteGame(g.id);
       if (form.id === g.id) setForm(newForm(form.round, form.table));
       flash("削除しました");
     } catch (e) { console.error(e); flash("削除できませんでした", false); }
+  };
+
+  const restore = async (g) => {
+    try { await restoreGame(g.id); flash("元に戻しました ✓"); }
+    catch (e) { console.error(e); flash("元に戻せませんでした", false); }
   };
 
   const save = async () => {
@@ -99,7 +108,7 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, staffN
     };
     setBusy(true);
     try {
-      await saveGame(form.id, game, staffName);
+      await saveGame(form.id, game);
       flash(form.id ? "更新しました ✓" : "登録しました ✓");
       // 同じ卓の次の回戦をすぐ入力できるよう、メンバーを残して点数だけ空にする
       setForm(form.id ? newForm(form.round, form.table) : newForm(form.round + 1, form.table, form.seats.map((s) => s.player)));
@@ -214,13 +223,33 @@ export function GameEntry({ date, setDate, rule, setRule, players, games, staffN
                 ))}
                 {g.adjustment && <span style={{ color: SC.orange, fontWeight: 700 }}>自動調整あり</span>}
               </div>
+              <button style={{ ...bigBtn("plain"), fontSize: 16 }} onClick={() => setHistoryOf(g)}>履歴</button>
               <button style={{ ...bigBtn("plain"), fontSize: 16 }} onClick={() => startEdit(g)}>編集</button>
               <button style={{ ...bigBtn("danger"), fontSize: 16 }} onClick={() => remove(g)}>削除</button>
             </div>
           );
         })}
         <div style={{ fontSize: 13, color: SC.muted, marginTop: 8 }}>チョンボは1回につき −{CHOMBO_PENALTY}ポイント</div>
+        {deletedGames.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <button style={{ ...bigBtn("plain"), fontSize: 15, minHeight: 44 }} onClick={() => setShowDeleted((v) => !v)}>
+              削除済み（{deletedGames.length}件）を{showDeleted ? "隠す" : "表示"}
+            </button>
+            {showDeleted && deletedGames.map((g) => (
+              <div key={g.id} style={{ borderTop: `1px solid ${SC.border}`, padding: "10px 0", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", color: SC.muted }}>
+                <div style={{ fontWeight: 800, fontSize: 16, minWidth: 110, textDecoration: "line-through" }}>{g.round}回戦 {g.table}卓</div>
+                <div style={{ flex: 1, fontSize: 14 }}>
+                  {g.seats.map((s) => `${s.name} ${fmtScore(s.score)}`).join(" / ")}
+                  {g.deletedBy && `（削除: ${g.deletedBy}）`}
+                </div>
+                <button style={{ ...bigBtn("plain"), fontSize: 15 }} onClick={() => setHistoryOf(g)}>履歴</button>
+                <button style={{ ...bigBtn("green"), fontSize: 15 }} onClick={() => restore(g)}>元に戻す</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+      {historyOf && <HistoryDialog game={historyOf} onClose={() => setHistoryOf(null)} />}
     </div>
   );
 }

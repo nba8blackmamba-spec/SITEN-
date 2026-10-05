@@ -125,7 +125,7 @@ export const autoAdjust = (ruleId, scores) => {
 };
 
 // ── 日別成績 ────────────────────────────────────────────
-// games: { round, rule, seats: [{ playerId, name, score, chombo }] } の配列（同じ日・同じルール）
+// games: { round, rule, deleted?, seats: [{ playerId, name, score, chombo }] } の配列（同じ日）
 // flags: { [playerId]: { yakuman, shitei } }（健康のみ）
 // 戻り値: { rounds: [1,2,...], rows: [{ playerId, name, total, byRound, rank, dailyP? }] }
 export const computeDaily = (ruleId, games, flags = {}) => {
@@ -133,7 +133,7 @@ export const computeDaily = (ruleId, games, flags = {}) => {
   const map = new Map();
   const roundSet = new Set();
   for (const g of games) {
-    if (g.rule !== ruleId) continue;
+    if (g.rule !== ruleId || g.deleted) continue; // 削除済みは集計しない
     const results = computeGame(ruleId, g.seats.map((s) => s.score), g.seats.map((s) => s.chombo));
     roundSet.add(g.round);
     g.seats.forEach((s, i) => {

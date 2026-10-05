@@ -112,6 +112,18 @@ test("日別: チョンボを引いた後のポイントで集計し、他ルー
   assert.equal(rows[0].playerId, "A");
 });
 
+test("日別: 削除済みの対局は集計しない", () => {
+  const seat = (playerId, score) => ({ playerId, name: playerId, score, chombo: 0 });
+  const seats = [seat("A", 40000), seat("B", 30000), seat("C", 20000), seat("D", 10000)];
+  const games = [
+    { rule: "lab", round: 1, seats },
+    { rule: "lab", round: 2, seats, deleted: true },
+  ];
+  const { rounds, rows } = computeDaily("lab", games);
+  assert.deepEqual(rounds, [1]);
+  assert.equal(rows.find((r) => r.playerId === "A").total, 60);
+});
+
 test("表示は小数第1位まで", () => {
   assert.equal(fmtPoint(16.6666), "+16.7");
   assert.equal(fmtPoint(-5), "-5.0");

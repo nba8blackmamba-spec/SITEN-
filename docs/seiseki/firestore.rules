@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════════════════════════════════════════════
+    // 既存のコレクション（予約・チャット・卓状況など）
+    // ※ この部分は「今まで通り誰でも読み書きできる」前提で書いています。
+    //    今のルールが違う内容なら、この部分は今のルールをそのまま使ってください。
+    // ════════════════════════════════════════════════════
+    match /reservations/{id}       { allow read, write: if true; }
+    match /events/{id}             { allow read, write: if true; }
+    match /eventApplications/{id}  { allow read, write: if true; }
+    match /settings/{id}           { allow read, write: if true; }
+    match /phoneToLineUserId/{id}  { allow read, write: if true; }
+    match /lineUsers/{rest=**}     { allow read, write: if true; }
+    match /siteChats/{rest=**}     { allow read, write: if true; }
+    match /tables/{id}             { allow read, write: if true; }
+    match /boardMeta/{id}          { allow read, write: if true; }
+
+    // ════════════════════════════════════════════════════
+    // ▼▼▼ ここから 麻雀成績 ▼▼▼
+    // 読み取り: 名簿・対局・日別チェックは公開／履歴はスタッフのみ
+    // 書き込み: seisekiStaff/{uid} に登録されたアカウントのみ。必ず履歴1件と同時に書く
+    // ════════════════════════════════════════════════════
+    function isSeisekiStaff() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/seisekiStaff/$(request.auth.uid));
+    }
+    function seisekiHistoryPath(hid) {
+      return /databases/$(database)/documents/seisekiHistory/$(hid);
+    }
+    // この書き込みと同じトランザクションで、新しい履歴が1件作られていること
+    function writesSeisekiHistory(target, docId) {
+      let hid = request.resource.data.lastHistoryId;
+      return hid is string
+        && !exists(seisekiHistoryPath(hid))
+        && existsAfter(seisekiHistoryPath(hid))
+        && getAfter(seisekiHistoryPath(hid)).data.target == target
+        && getAfter(seisekiHistoryPath(hid)).data.docId == docId
+        && getAfter(seisekiHistoryPath(hid)).data.uid == request.auth.uid;
+    }
+
+    // スタッフの登録（Firebaseコンソールからだけ追加・削除する）
+    match /seisekiStaff/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // 名簿（登録番号・登録名・読み仮名のみ。個人情報は入れられない）
+    match /players/{id} {
+      allow read: if true;
+      allow create: if isSeisekiStaff() && validPlayer()
+        && id == string(request.resource.data.regNo)
+        && writesSeisekiHistory('players', id);
+      allow update: if isSeisekiStaff() && validPlayer()
+        && request.resource.data.regNo == resource.data.regNo
+        && writesSeisekiHistory('players', id);
+      allow delete: if false;
+    }
+    function validPlayer() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['regNo', 'name', 'kana', 'createdAt', 'updatedAt', 'lastHistoryId'])
+        && d.regNo is int && d.regNo > 0
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 40
+        && d.kana is string && d.kana.size() <= 60;
+    }
+
+    // 対局（削除は「削除済み」の印で行う。本当の削除は禁止）
+    match /games/{id} {
+      allow read: if true;
+      allow create, update: if isSeisekiStaff() && validGame() && writesSeisekiHistory('games', id);
+      allow delete: if false;
+    }
+    function validGame() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['date', 'rule', 'round', 'table', 'seats', 'adjustment',
+                               'deleted', 'deletedAt', 'deletedBy',
+                               'createdAt', 'updatedAt', 'createdBy', 'updatedBy', 'lastHistoryId'])
+        && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.rule in ['kenko', 'lab', 'kyokai']
+        && d.round is int && d.table is int
+        && d.seats is list && d.seats.size() == 4
+        && d.deleted is bool;
+    }
+
+    // 健康の日別チェック（役満和了・指定役）
+    match /dailyFlags/{id} {
+      allow read: if true;
+      allow create, update: if isSeisekiStaff()
+        && request.resource.data.keys().hasOnly(['date', 'rule', 'flags', 'updatedAt', 'lastHistoryId'])
+        && id == request.resource.data.date + '_' + request.resource.data.rule
+        && writesSeisekiHistory('dailyFlags', id);
+      allow delete: if false;
+    }
+
+    // 変更履歴（追加のみ。書き換え・削除はできない）
+    match /seisekiHistory/{id} {
+      allow read: if isSeisekiStaff();
+      allow create: if isSeisekiStaff()
+        && request.resource.data.keys().hasOnly(['target', 'docId', 'action', 'before', 'after', 'at', 'uid', 'email', 'staffName'])
+        && request.resource.data.target in ['players', 'games', 'dailyFlags']
+        && request.resource.data.action in ['create', 'update', 'delete', 'restore']
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.at == request.time;
+      allow update, delete: if false;
+    }
+    // ▲▲▲ ここまで 麻雀成績 ▲▲▲
+  }
+}
