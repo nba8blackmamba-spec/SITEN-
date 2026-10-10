@@ -1,9 +1,13 @@
 // ════════════════════════════════════════════════════════
 // 卓状況ボード（/board ページ + 管理画面パネル + ヘッダー用ミニプレビュー）
 // ════════════════════════════════════════════════════════
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { db } from "./firebase";
 import { collection, doc, onSnapshot, setDoc, increment } from "firebase/firestore";
+import {
+  SCHEDULE_KINDS, scheduleKindInfo, buildTodaySchedule, visibleTodayItems, toMinutes,
+  withHidden, withExtraAdded, withExtraRemoved,
+} from "./schedule.js";
 
 export const GAME_MINUTES = 50;
 const TABLE_NUMBERS = [1, 2, 3, 4, 5, 6];
@@ -49,6 +53,11 @@ export const setRemainingMinutes = (n, startedAt, remainingMinutes) => {
   return setDoc(tableRef(n), { number: n, durationMinutes }, { merge: true });
 };
 
+// 「本日の予定」の手動分（追加・非表示）は boardMeta/main の todaySchedule に日付と一緒に保存する
+// （既存の waitCount と同じドキュメントなので、Firestore ルールの変更は不要）
+export const saveScheduleOverrides = (ov) =>
+  setDoc(metaRef, { todaySchedule: { date: ov.date, extras: ov.extras, hidden: ov.hidden } }, { merge: true });
+
 // ── フック ──────────────────────────────────────────────
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -93,6 +102,17 @@ function useWaitCount() {
     return unsub;
   }, []);
   return { waitCount };
+}
+
+function useScheduleOverrides() {
+  const [raw, setRaw] = useState(null);
+  useEffect(() => {
+    const unsub = onSnapshot(metaRef, (snap) => {
+      setRaw(snap.data()?.todaySchedule || null);
+    });
+    return unsub;
+  }, []);
+  return raw;
 }
 
 // ── 残り時間ロジック ────────────────────────────────────
@@ -207,6 +227,57 @@ function StatBar({ waitCount, inStoreCount, emptyCount, lowTimeCount, compact })
   );
 }
 
+// 「本日の予定」の枠（表示する予定が無ければ何も出さない）
+function TodaySchedule({ dateLabel, items, compact }) {
+  if (items.length === 0) return null;
+  return (
+    <div style={{
+      background: BC.surface, border: `1px solid ${BC.border}`, borderRadius: compact ? 8 : 10,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.06)", padding: compact ? "5px 8px" : "10px 14px",
+      marginBottom: compact ? 6 : 10,
+    }}>
+      <div style={{ fontSize: compact ? 10 : 13, fontWeight: 800, color: BC.text, marginBottom: compact ? 3 : 6 }}>
+        本日の予定　<span style={{ color: BC.muted, fontWeight: 700 }}>{dateLabel}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: compact ? 2 : 4 }}>
+        {items.map((it) => <TodayScheduleRow key={it.id} item={it} compact={compact} />)}
+      </div>
+    </div>
+  );
+}
+
+function TodayScheduleRow({ item, compact }) {
+  const active = item.status === "active";
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: compact ? 5 : 8, minWidth: 0,
+      padding: compact ? "2px 5px" : "5px 8px", borderRadius: 6,
+      background: active ? `${item.color}1A` : "transparent",
+    }}>
+      <span style={{ width: compact ? 7 : 10, height: compact ? 7 : 10, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+      <span style={{
+        fontSize: compact ? 10.5 : 14, fontWeight: active ? 800 : 700, color: BC.text,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0,
+      }}>
+        {item.name}
+      </span>
+      {item.timeLabel && (
+        <span style={{ fontSize: compact ? 9.5 : 13, color: active ? BC.text : BC.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+          {item.timeLabel}
+        </span>
+      )}
+      {active && (
+        <span style={{
+          marginLeft: "auto", flexShrink: 0, padding: compact ? "0 6px" : "1px 9px", borderRadius: 20,
+          fontSize: compact ? 8.5 : 11, fontWeight: 800, background: item.color, color: BC.white,
+        }}>
+          開催中
+        </span>
+      )}
+    </div>
+  );
+}
+
 function TableRow({ table, now, compact }) {
   const playing = table.status === "playing";
   const timed = isTimedType(table.type);
@@ -298,6 +369,11 @@ export function TableBoardPage() {
   const now = useNow(1000);
   const { tables } = useTables();
   const { waitCount } = useWaitCount();
+  // 予定の切り替えは分単位で判定する（画面は毎秒更新しているので、17:00 ちょうどに表示が変わる）
+  const scheduleOverrides = useScheduleOverrides();
+  const minuteNow = Math.floor(now / 60000) * 60000;
+  const schedule = useMemo(() => buildTodaySchedule(minuteNow, scheduleOverrides), [minuteNow, scheduleOverrides]);
+  const scheduleItems = visibleTodayItems(schedule);
   const emptyCount = tables.filter((t) => t.status === "empty").length;
   const inStoreCount = tables.reduce((sum, t) => sum + (t.status === "playing" ? t.memberCount : 0), 0);
   const lowTimeCount = tables.filter((t) => {
@@ -315,6 +391,7 @@ export function TableBoardPage() {
         {!compact && (
           <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.1em", marginBottom: 10 }}>SITEN 卓状況</div>
         )}
+        <TodaySchedule dateLabel={schedule.dateLabel} items={scheduleItems} compact={compact} />
         <StatBar waitCount={waitCount} inStoreCount={inStoreCount} emptyCount={emptyCount} lowTimeCount={lowTimeCount} compact={compact} />
         {!compact && (
           <div style={{ marginTop: 10, marginBottom: 4 }}>
@@ -389,8 +466,145 @@ export function AdminTableBoardPanel() {
         </div>
       </div>
 
+      <AdminTodaySchedule now={now} />
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 12 }}>
         {tables.map((t) => <AdminTableCard key={t.number} t={t} now={now} />)}
+      </div>
+    </div>
+  );
+}
+
+// ── 本日の予定（基本の予定 + 手で足した予定） ──────────
+// 00:00〜24:00 を15分刻みで選べるようにする
+const TIME_OPTIONS = Array.from({ length: 24 * 4 + 1 }, (_, i) =>
+  `${String(Math.floor(i / 4)).padStart(2, "0")}:${String((i % 4) * 15).padStart(2, "0")}`);
+const STATUS_LABELS = {
+  active: { label: "開催中", color: BC.green },
+  upcoming: { label: "これから", color: BC.blue },
+  ended: { label: "終了", color: BC.muted },
+  allday: { label: "終日", color: BC.purple },
+};
+const smallBtnStyle = (color, filled = false) => ({
+  padding: "5px 10px", borderRadius: 6, border: `1px solid ${color}`, cursor: "pointer",
+  fontSize: 11.5, fontWeight: 700, background: filled ? color : BC.white, color: filled ? BC.white : color, flexShrink: 0,
+});
+const timeSelectStyle = {
+  padding: "6px 6px", borderRadius: 6, border: `1px solid ${BC.border}`, fontSize: 12.5, color: BC.text, background: BC.white,
+};
+
+function AdminTodaySchedule({ now }) {
+  const raw = useScheduleOverrides();
+  const schedule = buildTodaySchedule(Math.floor(now / 60000) * 60000, raw);
+  const ov = schedule.overrides;
+  const [kind, setKind] = useState("proam");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+
+  const save = (next) => saveScheduleOverrides(next).catch(() => setError("保存できませんでした。通信状況を確認してください。"));
+
+  const add = () => {
+    const s = toMinutes(start);
+    const e = toMinutes(end);
+    if (s != null && e != null && e <= s) { setError("終了時間は開始時間より後にしてください。"); return; }
+    const extra = { id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind };
+    if (start) extra.start = start;
+    if (end) extra.end = end;
+    if (name.trim()) extra.name = name.trim();
+    setError("");
+    save(withExtraAdded(ov, extra));
+    setStart(""); setEnd(""); setName("");
+  };
+
+  return (
+    <div style={{ background: BC.surface, border: `1px solid ${BC.border}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+        <div style={{ fontSize: 14, fontWeight: 800 }}>本日の予定</div>
+        <div style={{ fontSize: 12, color: BC.muted, fontWeight: 700 }}>{schedule.dateLabel}</div>
+      </div>
+      <div style={{ fontSize: 11, color: BC.muted, marginBottom: 10 }}>
+        /board の一番上に表示されます。「今日は非表示」と追加した予定は今日だけ有効で、翌日には自動で元に戻ります。
+      </div>
+
+      {schedule.items.length === 0 && (
+        <div style={{ fontSize: 12, color: BC.muted, padding: "6px 0" }}>今日の予定はありません。</div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {schedule.items.map((it) => {
+          const st = STATUS_LABELS[it.status];
+          return (
+            <div key={it.id} style={{
+              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px",
+              border: `1px solid ${BC.border}`, borderRadius: 8, background: it.hidden ? BC.bg : BC.white,
+              opacity: it.hidden || it.status === "ended" ? 0.6 : 1,
+            }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: it.color, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, textDecoration: it.hidden ? "line-through" : "none" }}>
+                  {it.name}
+                  {it.timeLabel && (
+                    <span style={{ display: "inline-block", marginLeft: 8, fontSize: 12, color: BC.muted, fontWeight: 600, whiteSpace: "nowrap" }}>{it.timeLabel}</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: st.color }}>{st.label}</span>
+                  <span style={{ fontSize: 10.5, color: BC.muted }}>{it.source === "base" ? "基本の予定" : "手で追加"}</span>
+                  {it.hidden && <span style={{ fontSize: 10.5, fontWeight: 700, color: BC.red }}>今日は非表示</span>}
+                </div>
+              </div>
+              {it.hidden ? (
+                <button onClick={() => save(withHidden(ov, it.id, false))} style={smallBtnStyle(BC.blue)}>表示に戻す</button>
+              ) : (
+                <button onClick={() => save(withHidden(ov, it.id, true))} style={smallBtnStyle(BC.muted)}>今日は非表示</button>
+              )}
+              {it.source === "extra" && (
+                <button onClick={() => save(withExtraRemoved(ov, it.id))} style={smallBtnStyle(BC.red)}>削除</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${BC.border}` }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>予定を追加</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {SCHEDULE_KINDS.map((k) => (
+            <button key={k.id} onClick={() => setKind(k.id)} style={{
+              display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 20, cursor: "pointer",
+              fontSize: 12, fontWeight: 700, border: `1.5px solid ${kind === k.id ? k.color : BC.border}`,
+              background: kind === k.id ? `${k.color}22` : BC.white, color: BC.text,
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: k.color }} />{k.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: BC.muted }}>時間(任意)</span>
+          <select value={start} onChange={(e) => setStart(e.target.value)} style={timeSelectStyle} aria-label="開始時間">
+            <option value="">開始 --:--</option>
+            {TIME_OPTIONS.slice(0, -1).map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <span style={{ fontSize: 12, color: BC.muted }}>〜</span>
+          <select value={end} onChange={(e) => setEnd(e.target.value)} style={timeSelectStyle} aria-label="終了時間">
+            <option value="">終了 --:--</option>
+            {TIME_OPTIONS.slice(1).map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            value={name} onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder={`名前(任意。空なら「${scheduleKindInfo(kind).label}」)`}
+            style={{
+              flex: 1, minWidth: 0, padding: "7px 9px", borderRadius: 6, border: `1px solid ${BC.border}`,
+              fontSize: 12.5, color: BC.text, background: BC.white,
+            }}
+          />
+          <button onClick={add} style={smallBtnStyle(BC.blue, true)}>追加</button>
+        </div>
+        {error && <div style={{ marginTop: 6, fontSize: 11.5, color: BC.red, fontWeight: 700 }}>{error}</div>}
       </div>
     </div>
   );
