@@ -366,6 +366,11 @@ export function TableBoardPage() {
     try { return new URLSearchParams(window.location.search).get("compact") === "true"; }
     catch { return false; }
   });
+  // ヘッダー用ミニプレビューは schedule=false を付けて「本日の予定」を出さない(集計バーを見せるため)
+  const [showSchedule] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("schedule") !== "false"; }
+    catch { return true; }
+  });
   const now = useNow(1000);
   const { tables } = useTables();
   const { waitCount } = useWaitCount();
@@ -391,7 +396,7 @@ export function TableBoardPage() {
         {!compact && (
           <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.1em", marginBottom: 10 }}>SITEN 卓状況</div>
         )}
-        <TodaySchedule dateLabel={schedule.dateLabel} items={scheduleItems} compact={compact} />
+        {showSchedule && <TodaySchedule dateLabel={schedule.dateLabel} items={scheduleItems} compact={compact} />}
         <StatBar waitCount={waitCount} inStoreCount={inStoreCount} emptyCount={emptyCount} lowTimeCount={lowTimeCount} compact={compact} />
         {!compact && (
           <div style={{ marginTop: 10, marginBottom: 4 }}>
@@ -753,7 +758,7 @@ export function HeaderBoardPreview() {
       }}
     >
       <iframe
-        src="/board?compact=true"
+        src="/board?compact=true&schedule=false"
         title="卓状況プレビュー"
         scrolling="no"
         style={{ width: "100%", height: "100%", border: "none", pointerEvents: "none" }}
