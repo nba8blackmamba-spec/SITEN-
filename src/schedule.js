@@ -139,7 +139,8 @@ export function buildTodaySchedule(nowMs, rawOverrides, config = BASE_SCHEDULE) 
     ...it,
     name: itemName(it),
     color: scheduleKindInfo(it.kind).color,
-    timeLabel: formatTimeRange(it),
+    // 基本の予定で時間のないもの(土日祝のラボ)は「終日」、手で足した予定で時間のないものは何も出さない
+    timeLabel: formatTimeRange(it) || (it.source === "base" ? "終日" : ""),
     status: itemStatus(it, minutes),
     hidden: ov.hidden.includes(it.id),
   }));
@@ -149,6 +150,19 @@ export function buildTodaySchedule(nowMs, rawOverrides, config = BASE_SCHEDULE) 
     return as - bs || ae - be;
   });
   return { dateKey, dateLabel: formatScheduleDate(dateKey), minutes, items, overrides: ov };
+}
+
+// 保存する値（古いデータの掃除）
+// 今日(dateKey)の分だけを残す: 日付の違う手動予定・非表示の指定は捨て、
+// 非表示の指定も「今日の基本の予定」か「残っている手動予定」を指すものだけにする
+export function prunedOverrides(raw, dateKey, config = BASE_SCHEDULE) {
+  const ov = overridesFor(raw, dateKey);
+  const ids = new Set([...baseItemsFor(dateKey, config).map((it) => it.id), ...ov.extras.map((x) => x.id)]);
+  return {
+    date: dateKey,
+    extras: ov.extras,
+    hidden: [...new Set(ov.hidden)].filter((id) => ids.has(id)),
+  };
 }
 
 // /board に出す分（非表示・終了したものを除く）
