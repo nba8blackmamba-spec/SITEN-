@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import holidayJp from "@holiday-jp/holiday_jp";
 import {
   jstParts, dayTypeOf, itemStatus, buildTodaySchedule, visibleTodayItems,
-  formatScheduleDate, toMinutes, overridesFor, withHidden, withExtraAdded, withExtraRemoved, BASE_SCHEDULE,
+  formatScheduleDate, toMinutes, overridesFor, prunedOverrides, withHidden, withExtraAdded, withExtraRemoved, BASE_SCHEDULE,
 } from "./schedule.js";
 import { isJapaneseHoliday, listJapaneseHolidays, HOLIDAY_TABLE_LAST_YEAR } from "./holidaysJP.js";
 
@@ -74,7 +74,7 @@ describe("曜日の判定", () => {
   });
   it("第2・第4金曜が祝日なら祝日を優先", () => {
     expect(dayTypeOf("2028-02-11")).toBe("holiday"); // 金・建国記念の日(第2金曜)
-    expect(visible("2028-02-11", "18:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
+    expect(visible("2028-02-11", "18:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
   });
 });
 
@@ -118,12 +118,12 @@ describe("第2・第4金曜・土日・祝日", () => {
     expect(visible("2026-10-23", "18:30").map((x) => x.name)).toEqual(["協会ルール"]);
   });
   it("土日は終日ラボ(時間なし)", () => {
-    expect(visible("2026-10-10", "10:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
-    expect(visible("2026-10-11", "23:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
+    expect(visible("2026-10-10", "10:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
+    expect(visible("2026-10-11", "23:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
   });
   it("祝日(平日)は終日ラボ", () => {
-    expect(visible("2026-11-03", "13:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
-    expect(visible("2026-11-23", "18:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
+    expect(visible("2026-11-03", "13:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
+    expect(visible("2026-11-23", "18:00")).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
   });
 });
 
@@ -133,10 +133,16 @@ describe("手で変えた予定", () => {
   it("追加した予定が時間順に並ぶ(時間なしが先頭)", () => {
     const ov = withExtraAdded(overridesFor(null, day), extra);
     expect(visible(day, "12:00", ov)).toEqual([
-      { id: "base:lab-allday", name: "ラボ", time: "", status: "allday" },
+      { id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" },
       { id: "x1", name: "プロアマS第5戦", time: "13:00〜18:00", status: "upcoming" },
     ]);
     expect(visible(day, "18:00", ov).map((x) => x.id)).toEqual(["base:lab-allday"]);
+  });
+  it("手で足した予定の時間の出し方(開始だけは「17:00〜」、時間なしは何も出さない)", () => {
+    const ov = withExtraAdded(withExtraAdded(overridesFor(null, day),
+      { id: "x3", kind: "other", name: "貸切", start: "17:00" }),
+      { id: "x4", kind: "other", name: "メモ" });
+    expect(visible(day, "12:00", ov).map((x) => x.time)).toEqual(["終日", "", "17:00〜"]);
   });
   it("名前を省略すると種別名になる", () => {
     const ov = withExtraAdded(overridesFor(null, day), { id: "x2", kind: "tournament" });
@@ -149,7 +155,35 @@ describe("手で変えた予定", () => {
   });
   it("日付が変わると、追加・非表示は効かなくなる", () => {
     const ov = withHidden(withExtraAdded(overridesFor(null, day), extra), "base:lab-allday", true);
-    expect(visible("2026-10-11", "12:00", ov)).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "", status: "allday" }]);
+    expect(visible("2026-10-11", "12:00", ov)).toEqual([{ id: "base:lab-allday", name: "ラボ", time: "終日", status: "allday" }]);
+  });
+  it("23:59に表示される手動予定は、翌日0:00には表示されない", () => {
+    const ov = withExtraAdded(overridesFor(null, day), { id: "x5", kind: "other", name: "深夜の部", start: "20:00" });
+    expect(visible(day, "23:59", ov).map((x) => x.id)).toContain("x5");
+    const next = buildTodaySchedule(jst(day, "23:59") + 60 * 1000, ov);
+    expect(next.dateKey).toBe("2026-10-11");
+    expect(visibleTodayItems(next).map((x) => x.id)).toEqual(["base:lab-allday"]);
+    expect(next.items.map((x) => x.id)).not.toContain("x5");
+  });
+  it("前日の「今日は非表示」は翌日0:00には効かない", () => {
+    const ov = withHidden(overridesFor(null, day), "base:lab-allday", true);
+    expect(visible(day, "23:59", ov)).toEqual([]);
+    expect(visible("2026-10-11", "00:00", ov).map((x) => x.id)).toEqual(["base:lab-allday"]);
+  });
+  it("保存時の掃除: 古い日付の手動予定・非表示はまとめて消える", () => {
+    const old = withHidden(withExtraAdded(overridesFor(null, "2026-10-09"), extra), "base:lab", true);
+    expect(prunedOverrides(old, day)).toEqual({ date: day, extras: [], hidden: [] });
+    // 前日の分を引き継がず、今日の変更だけが保存される
+    const today = withExtraAdded(overridesFor(old, day), { id: "x6", kind: "lab" });
+    expect(prunedOverrides(today, day)).toEqual({ date: day, extras: [{ id: "x6", kind: "lab" }], hidden: [] });
+  });
+  it("保存時の掃除: 今日の予定を指さない非表示の指定と重複は消える", () => {
+    const ov = { date: day, extras: [extra], hidden: ["x1", "x1", "base:lab-allday", "base:health", "gone"] };
+    expect(prunedOverrides(ov, day)).toEqual({ date: day, extras: [extra], hidden: ["x1", "base:lab-allday"] });
+  });
+  it("保存時の掃除: 壊れたデータは空として扱う", () => {
+    expect(prunedOverrides(null, day)).toEqual({ date: day, extras: [], hidden: [] });
+    expect(prunedOverrides({ date: day, extras: "x", hidden: [1, null] }, day)).toEqual({ date: day, extras: [], hidden: [] });
   });
   it("追加した予定を消すと、非表示指定も消える", () => {
     const ov = withHidden(withExtraAdded(overridesFor(null, day), extra), "x1", true);

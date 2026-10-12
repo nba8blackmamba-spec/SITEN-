@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { db } from "./firebase";
 import { collection, doc, onSnapshot, setDoc, increment } from "firebase/firestore";
 import {
-  SCHEDULE_KINDS, scheduleKindInfo, buildTodaySchedule, visibleTodayItems, toMinutes,
+  SCHEDULE_KINDS, scheduleKindInfo, buildTodaySchedule, visibleTodayItems, toMinutes, jstParts, prunedOverrides,
   withHidden, withExtraAdded, withExtraRemoved,
 } from "./schedule.js";
 
@@ -55,8 +55,10 @@ export const setRemainingMinutes = (n, startedAt, remainingMinutes) => {
 
 // 「本日の予定」の手動分（追加・非表示）は boardMeta/main の todaySchedule に日付と一緒に保存する
 // （既存の waitCount と同じドキュメントなので、Firestore ルールの変更は不要）
+// 保存のたびに、保存する時点の日本時間の日付で掃除してから todaySchedule をまるごと置き換える
+// (mergeFields で todaySchedule 以外の項目には触れない。古い日付の分はここで消える)
 export const saveScheduleOverrides = (ov) =>
-  setDoc(metaRef, { todaySchedule: { date: ov.date, extras: ov.extras, hidden: ov.hidden } }, { merge: true });
+  setDoc(metaRef, { todaySchedule: prunedOverrides(ov, jstParts(Date.now()).dateKey) }, { mergeFields: ["todaySchedule"] });
 
 // ── フック ──────────────────────────────────────────────
 function useNow(intervalMs = 1000) {
@@ -232,48 +234,64 @@ function TodaySchedule({ dateLabel, items, compact }) {
   if (items.length === 0) return null;
   return (
     <div style={{
-      background: BC.surface, border: `1px solid ${BC.border}`, borderRadius: compact ? 8 : 10,
-      boxShadow: "0 1px 3px rgba(0,0,0,0.06)", padding: compact ? "5px 8px" : "10px 14px",
-      marginBottom: compact ? 6 : 10,
+      background: BC.surface, border: `1px solid ${BC.border}`, borderRadius: compact ? 8 : 12,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.06)", padding: compact ? "8px 8px" : "16px 16px",
     }}>
-      <div style={{ fontSize: compact ? 10 : 13, fontWeight: 800, color: BC.text, marginBottom: compact ? 3 : 6 }}>
-        本日の予定　<span style={{ color: BC.muted, fontWeight: 700 }}>{dateLabel}</span>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: compact ? 6 : 12 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: BC.text }}>本日の予定</span>
+        <span style={{ fontSize: compact ? 11 : 12, fontWeight: 700, color: BC.muted }}>{dateLabel}</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: compact ? 2 : 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: compact ? 5 : 8 }}>
         {items.map((it) => <TodayScheduleRow key={it.id} item={it} compact={compact} />)}
       </div>
     </div>
   );
 }
 
+// 予定1件 = 横長の帯（左に色バー、背景は種別色の薄い色。開催中は外枠と「開催中」の印）
 function TodayScheduleRow({ item, compact }) {
   const active = item.status === "active";
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: compact ? 5 : 8, minWidth: 0,
-      padding: compact ? "2px 5px" : "5px 8px", borderRadius: 6,
-      background: active ? `${item.color}1A` : "transparent",
+      display: "flex", borderRadius: compact ? 6 : 8, overflow: "hidden", background: `${item.color}1F`,
+      // 外枠は内側の影で描く(枠の有無で帯の大きさが変わらないように)
+      boxShadow: active ? `inset 0 0 0 2px ${item.color}` : "none",
     }}>
-      <span style={{ width: compact ? 7 : 10, height: compact ? 7 : 10, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
-      <span style={{
-        fontSize: compact ? 10.5 : 14, fontWeight: active ? 800 : 700, color: BC.text,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0,
+      <div style={{ width: 8, flexShrink: 0, background: item.color }} />
+      <div style={{
+        flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: compact ? 8 : 10,
+        padding: compact ? "6px 8px 6px 9px" : "11px 12px 11px 13px",
       }}>
-        {item.name}
-      </span>
-      {item.timeLabel && (
-        <span style={{ fontSize: compact ? 9.5 : 13, color: active ? BC.text : BC.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-          {item.timeLabel}
-        </span>
-      )}
-      {active && (
-        <span style={{
-          marginLeft: "auto", flexShrink: 0, padding: compact ? "0 6px" : "1px 9px", borderRadius: 20,
-          fontSize: compact ? 8.5 : 11, fontWeight: 800, background: item.color, color: BC.white,
+        <div style={{
+          flex: 1, minWidth: 0, fontSize: compact ? 18 : 20, fontWeight: 800, color: BC.text,
+          lineHeight: 1.3, overflowWrap: "anywhere",
         }}>
-          開催中
-        </span>
-      )}
+          {item.name}
+        </div>
+        {(item.timeLabel || active) && (
+          // 時間と「開催中」は右側に縦に積む(スマホ幅でも名前の幅を確保するため)
+          <div style={{
+            flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: compact ? 3 : 5,
+          }}>
+            {item.timeLabel && (
+              <span style={{
+                fontSize: compact ? 14 : 16, fontWeight: 700, color: BC.text,
+                fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+              }}>
+                {item.timeLabel}
+              </span>
+            )}
+            {active && (
+              <span style={{
+                padding: compact ? "2px 8px" : "3px 10px", borderRadius: 999, whiteSpace: "nowrap",
+                fontSize: compact ? 11 : 12, fontWeight: 800, background: item.color, color: BC.white,
+              }}>
+                開催中
+              </span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -366,10 +384,15 @@ export function TableBoardPage() {
     try { return new URLSearchParams(window.location.search).get("compact") === "true"; }
     catch { return false; }
   });
-  // ヘッダー用ミニプレビューは schedule=false を付けて「本日の予定」を出さない(集計バーを見せるため)
+  // ヘッダー用ミニプレビューは schedule=false を付けて「本日の予定」を出さない(卓カードが小さすぎるので集計バーを見せる)
   const [showSchedule] = useState(() => {
     try { return new URLSearchParams(window.location.search).get("schedule") !== "false"; }
     catch { return true; }
+  });
+  // 集計バー(待ち・店内・空き・残りわずか)は stats=true を付けたときだけ出す
+  const [showStats] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("stats") === "true"; }
+    catch { return false; }
   });
   const now = useNow(1000);
   const { tables } = useTables();
@@ -394,16 +417,16 @@ export function TableBoardPage() {
     }}>
       <div style={{ maxWidth: compact ? "100%" : 640, margin: "0 auto" }}>
         {!compact && (
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.1em", marginBottom: 10 }}>SITEN 卓状況</div>
-        )}
-        {showSchedule && <TodaySchedule dateLabel={schedule.dateLabel} items={scheduleItems} compact={compact} />}
-        <StatBar waitCount={waitCount} inStoreCount={inStoreCount} emptyCount={emptyCount} lowTimeCount={lowTimeCount} compact={compact} />
-        {!compact && (
-          <div style={{ marginTop: 10, marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px 12px", flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.1em" }}>SITEN 卓状況</div>
             <TypeLegend />
           </div>
         )}
-        <div style={{ display: "flex", flexDirection: "column", gap: compact ? 6 : 10, marginTop: compact ? 6 : 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: compact ? 6 : 10 }}>
+          {showSchedule && <TodaySchedule dateLabel={schedule.dateLabel} items={scheduleItems} compact={compact} />}
+          {showStats && (
+            <StatBar waitCount={waitCount} inStoreCount={inStoreCount} emptyCount={emptyCount} lowTimeCount={lowTimeCount} compact={compact} />
+          )}
           {tables.map((t) => <TableRow key={t.number} table={t} now={now} compact={compact} />)}
         </div>
       </div>
@@ -758,7 +781,7 @@ export function HeaderBoardPreview() {
       }}
     >
       <iframe
-        src="/board?compact=true&schedule=false"
+        src="/board?compact=true&schedule=false&stats=true"
         title="卓状況プレビュー"
         scrolling="no"
         style={{ width: "100%", height: "100%", border: "none", pointerEvents: "none" }}
