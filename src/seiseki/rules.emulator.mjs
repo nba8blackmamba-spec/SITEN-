@@ -143,9 +143,57 @@ test("日別チェック: 文書IDは 日付_ルール", async () => {
     { date: "2026-10-06", rule: "kenko", flags: {}, updatedAt: "x" }, { target: "dailyFlags" }));
 });
 
-test("既存のコレクションは今まで通り（ログインなしで読み書きできる）", async () => {
-  await setDoc(doc(anon.db, "reservations/r1"), { name: "x" });
-  await setDoc(doc(anon.db, "tables/1"), { status: "empty" });
-  await setDoc(doc(anon.db, "lineUsers/u1/messages/m1"), { text: "x" });
-  assert.equal((await getDoc(doc(anon.db, "reservations/r1"))).data().name, "x");
+// 既存の9コレクション（今まで通り、ログインなしで読み書きできる）
+const EXISTING = ["boardMeta", "eventApplications", "events", "lineUsers", "phoneToLineUserId",
+  "reservations", "settings", "siteChats", "tables"];
+
+test("既存の9コレクションは、ログインなしで読み書き・削除できる（サブコレクションも）", async () => {
+  const paths = [
+    ...EXISTING.map((c) => `${c}/anon-test`),
+    "lineUsers/u1/messages/m1",
+    "siteChats/09000000000/messages/m1",
+    "reservations/r1/anySub/x1", // まだ使っていないサブコレクションも今まで通り
+  ];
+  for (const path of paths) {
+    await setDoc(doc(anon.db, path), { v: 1 });
+    assert.equal((await getDoc(doc(anon.db, path))).data().v, 1, path);
+    await setDoc(doc(anon.db, path), { v: 2 }, { merge: true });
+    await deleteDoc(doc(anon.db, path));
+  }
+  for (const c of EXISTING) await getDocs(collection(anon.db, c)); // 一覧の読み取り
+  await getDocs(collection(anon.db, "lineUsers/u1/messages"));
+});
+
+test("9つ以外のコレクションは、ログインなしでは読み書きできない", async () => {
+  for (const path of ["users/u1", "foo/x", "seisekiBackups/b1", "reservation/r1", "Reservations/r1", "foo/x/bar/y"]) {
+    await denied(setDoc(doc(anon.db, path), { v: 1 }));
+    await denied(getDoc(doc(anon.db, path)));
+  }
+  await denied(getDocs(collection(anon.db, "users")));
+  // スタッフでも、ルールにない場所には書けない
+  await denied(setDoc(doc(staff.db, "foo/x"), { v: 1 }));
+  // 成績のコレクションの下にサブコレクションは作れない
+  await denied(setDoc(doc(anon.db, "games/g1/sub/x"), { v: 1 }));
+  await denied(setDoc(doc(staff.db, "players/1/sub/x"), { v: 1 }));
+});
+
+test("成績の5コレクションは、スタッフ以外（未ログイン・未登録アカウント）は書けない", async () => {
+  for (const c of [anon, other]) {
+    await denied(writeWithHistory(c, "players/50", player(50), { target: "players" }));
+    await denied(writeWithHistory(c, "games/x50", game(), { target: "games" }));
+    await denied(writeWithHistory(c, "dailyFlags/2026-10-05_kenko",
+      { date: "2026-10-05", rule: "kenko", flags: {}, updatedAt: "x" }, { target: "dailyFlags" }));
+    await denied(setDoc(doc(c.db, "seisekiHistory/h50"), {
+      target: "games", docId: "x50", action: "create", before: null, after: {}, at: serverTimestamp(),
+      uid: c.uid ?? null, email: "", staffName: "",
+    }));
+    await denied(setDoc(doc(c.db, `seisekiStaff/${c.uid ?? "anon"}`), { name: "x" }));
+    await denied(deleteDoc(doc(c.db, "games/g1")));
+  }
+  // スタッフ自身も seisekiStaff は書き換えられない（コンソールからのみ）
+  await denied(setDoc(doc(staff.db, `seisekiStaff/${staff.uid}`), { name: "x" }));
+  await denied(setDoc(doc(staff.db, `seisekiStaff/${other.uid}`), { name: "x" }));
+  // 公開データは誰でも読める
+  await getDocs(collection(anon.db, "players"));
+  await getDocs(collection(anon.db, "dailyFlags"));
 });

@@ -3,19 +3,20 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ════════════════════════════════════════════════════
-    // 既存のコレクション（予約・チャット・卓状況など）
-    // ※ この部分は「今まで通り誰でも読み書きできる」前提で書いています。
-    //    今のルールが違う内容なら、この部分は今のルールをそのまま使ってください。
+    // 既存のコレクション（予約・チャット・卓状況など）: 今まで通り誰でも読み書きできる
+    // {rest=**} なので、サブコレクション（lineUsers/{id}/messages など）も含む
+    // ※ 全体を許可する match /{document=**} は入れないこと（成績の制限が効かなくなる）
+    // ※ 新しいコレクションを使うときは、ここに1行追加する（追加しないと読み書きできない）
     // ════════════════════════════════════════════════════
-    match /reservations/{id}       { allow read, write: if true; }
-    match /events/{id}             { allow read, write: if true; }
-    match /eventApplications/{id}  { allow read, write: if true; }
-    match /settings/{id}           { allow read, write: if true; }
-    match /phoneToLineUserId/{id}  { allow read, write: if true; }
-    match /lineUsers/{rest=**}     { allow read, write: if true; }
-    match /siteChats/{rest=**}     { allow read, write: if true; }
-    match /tables/{id}             { allow read, write: if true; }
-    match /boardMeta/{id}          { allow read, write: if true; }
+    match /boardMeta/{rest=**}          { allow read, write: if true; }
+    match /eventApplications/{rest=**}  { allow read, write: if true; }
+    match /events/{rest=**}             { allow read, write: if true; }
+    match /lineUsers/{rest=**}          { allow read, write: if true; }
+    match /phoneToLineUserId/{rest=**}  { allow read, write: if true; }
+    match /reservations/{rest=**}       { allow read, write: if true; }
+    match /settings/{rest=**}           { allow read, write: if true; }
+    match /siteChats/{rest=**}          { allow read, write: if true; }
+    match /tables/{rest=**}             { allow read, write: if true; }
 
     // ════════════════════════════════════════════════════
     // ▼▼▼ ここから 麻雀成績 ▼▼▼
@@ -93,7 +94,7 @@ service cloud.firestore {
         && (d.adjustment == null || noEmail(d.adjustment.get('by', null)));
     }
 
-    // 健康の日別チェック（役満和了・指定役）
+    // 健康の日別チェック（役満和了・指定役・同点のときに手入力した順位P）
     match /dailyFlags/{id} {
       allow read: if true;
       allow create, update: if isSeisekiStaff()
