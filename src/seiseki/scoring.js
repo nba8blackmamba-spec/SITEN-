@@ -35,9 +35,11 @@ export const RULE_IDS = Object.keys(RULES);
 export const ruleOf = (id) => RULES[id] || null;
 
 // 健康の日別「本日P」
-export const DAILY_RANK_POINTS = [20, 15, 12, 10]; // 1〜4位（5位以下は0）
-export const DAILY_PLUS_BONUS = 5;   // 合計が0以上
-export const DAILY_MINUS_BONUS = 2;  // 合計がマイナス
+// 順位P は「1〜4位の順位点」か「5位以下のプラス・マイナス点」のどちらか1つ（足し合わせない）
+// それに役満和了・指定役のボーナスを足したものが本日P
+export const DAILY_RANK_POINTS = [20, 15, 12, 10]; // 1〜4位
+export const DAILY_PLUS_POINT = 5;   // 5位以下で合計が0以上（ちょうど0も含む）
+export const DAILY_MINUS_POINT = 2;  // 5位以下で合計がマイナス
 export const DAILY_YAKUMAN_BONUS = 5;
 export const DAILY_SHITEI_BONUS = 1;
 
@@ -126,8 +128,10 @@ export const autoAdjust = (ruleId, scores) => {
 
 // ── 日別成績 ────────────────────────────────────────────
 // games: { round, rule, deleted?, seats: [{ playerId, name, score, chombo }] } の配列（同じ日）
-// flags: { [playerId]: { yakuman, shitei } }（健康のみ）
-// 戻り値: { rounds: [1,2,...], rows: [{ playerId, name, total, byRound, rank, dailyP? }] }
+// flags: { [playerId]: { yakuman, shitei, manualRankP } }（健康のみ。manualRankP は同点時に手入力した順位P）
+// 戻り値: { rounds: [1,2,...], rows: [{ playerId, name, total, byRound, rank, tie?, rankP?, dailyP? }] }
+//   健康のみ: tie = 1〜4位が関わる同点（順位Pは手入力が必要）
+//             rankP / dailyP = 決まらないときは null（月間の集計には入れない）
 export const computeDaily = (ruleId, games, flags = {}) => {
   const rule = ruleOf(ruleId);
   const map = new Map();
@@ -147,13 +151,21 @@ export const computeDaily = (ruleId, games, flags = {}) => {
   const ranks = rankDesc(rows.map((r) => r.total));
   rows.forEach((r, i) => { r.rank = ranks[i]; });
   if (rule.dailyBonus) {
-    const placeP = sharedPlaceValues(rows.map((r) => r.total), DAILY_RANK_POINTS);
-    rows.forEach((r, i) => {
+    rows.forEach((r) => {
       const f = flags[r.playerId] || {};
-      r.dailyP = placeP[i]
-        + (key(r.total) >= 0 ? DAILY_PLUS_BONUS : DAILY_MINUS_BONUS)
-        + (f.yakuman ? DAILY_YAKUMAN_BONUS : 0)
-        + (f.shitei ? DAILY_SHITEI_BONUS : 0);
+      const tiedCount = rows.filter((x) => key(x.total) === key(r.total)).length;
+      // 同点の人たちが占める着順（r.rank 〜 r.rank+tiedCount-1）に 1〜4位が含まれるか
+      r.tie = tiedCount > 1 && r.rank <= DAILY_RANK_POINTS.length;
+      if (r.tie) {
+        const manual = f.manualRankP;
+        r.rankP = typeof manual === "number" && Number.isFinite(manual) ? manual : null;
+      } else if (r.rank <= DAILY_RANK_POINTS.length) {
+        r.rankP = DAILY_RANK_POINTS[r.rank - 1];
+      } else {
+        r.rankP = key(r.total) >= 0 ? DAILY_PLUS_POINT : DAILY_MINUS_POINT;
+      }
+      r.dailyP = r.rankP === null ? null
+        : r.rankP + (f.yakuman ? DAILY_YAKUMAN_BONUS : 0) + (f.shitei ? DAILY_SHITEI_BONUS : 0);
     });
   }
   rows.sort((a, b) => a.rank - b.rank || String(a.name).localeCompare(String(b.name), "ja"));

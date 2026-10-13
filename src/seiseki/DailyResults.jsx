@@ -1,5 +1,5 @@
 // 日別成績（日付・ルールごと。ルールは混ぜない）
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RULES, RULE_IDS, computeDaily, fmtPoint } from "./scoring";
 import { useDailyFlags, setDailyFlag, saveErrorMessage } from "./store";
 import { SC, card, label, input, bigBtn, pointColor } from "./ui";
@@ -23,6 +23,13 @@ export function DailyResults({ date, setDate, rule, setRule, games, players, fla
   const { rounds, rows } = useMemo(() => computeDaily(rule, games, flags), [rule, games, flags]);
   const nameOf = (r) => players.find((p) => p.id === r.playerId)?.name || r.name;
   const bonus = RULES[rule].dailyBonus;
+
+  const saveManualRankP = (playerId, text) => {
+    const t = text.trim();
+    if (t !== "" && !/^\d+(\.\d)?$/.test(t)) { flash("順位Pは数字で入力してください（例: 15）", false); return false; }
+    toggle(playerId, "manualRankP", t === "" ? null : Number(t));
+    return true;
+  };
 
   const toggle = (playerId, field, value) => {
     const k = [date, rule, playerId, field].join("|");
@@ -65,6 +72,7 @@ export function DailyResults({ date, setDate, rule, setRule, games, players, fla
                 {rounds.map((n) => <th key={n} style={th}>{n}回戦</th>)}
                 {bonus && <th style={{ ...th, textAlign: "center" }}>役満和了</th>}
                 {bonus && <th style={{ ...th, textAlign: "center" }}>指定役</th>}
+                {bonus && <th style={th}>順位P</th>}
                 {bonus && <th style={th}>本日P</th>}
               </tr>
             </thead>
@@ -84,7 +92,17 @@ export function DailyResults({ date, setDate, rule, setRule, games, players, fla
                       <input type="checkbox" checked={!!flags[r.playerId]?.[f]} onChange={(e) => toggle(r.playerId, f, e.target.checked)} style={{ width: 28, height: 28, cursor: "pointer" }} />
                     </td>
                   ))}
-                  {bonus && <td style={{ ...td, fontWeight: 800 }}>{fmtP(r.dailyP)}</td>}
+                  {bonus && (
+                    <td style={td}>
+                      {r.tie ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                          <span style={{ background: `${SC.orange}33`, color: SC.text, fontSize: 13, fontWeight: 800, padding: "3px 8px", borderRadius: 6 }}>同点</span>
+                          <RankPInput value={r.rankP} onSave={(text) => saveManualRankP(r.playerId, text)} />
+                        </div>
+                      ) : fmtP(r.rankP)}
+                    </td>
+                  )}
+                  {bonus && <td style={{ ...td, fontWeight: 800 }}>{r.dailyP === null ? "" : fmtP(r.dailyP)}</td>}
                 </tr>
               ))}
             </tbody>
@@ -92,10 +110,27 @@ export function DailyResults({ date, setDate, rule, setRule, games, players, fla
         )}
         {bonus && rows.length > 0 && (
           <div style={{ fontSize: 13, color: SC.muted, marginTop: 10 }}>
-            本日P = 合計の順位点（1位20・2位15・3位12・4位10、同点は平均）＋ 合計0以上なら5／マイナスなら2 ＋ 役満和了5 ＋ 指定役1
+            本日P = 順位P（1〜4位: 20・15・12・10／5位以下: 合計0以上なら5・マイナスなら2）＋ 役満和了5 ＋ 指定役1
+            <br />1〜4位が関わる同点は「同点」と表示されます。順位Pを手入力するまで本日Pは空欄で、月間の集計には入りません
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// 同点のときの順位P 手入力欄（入力し終えたら保存）
+function RankPInput({ value, onSave }) {
+  const shown = value === null || value === undefined ? "" : String(value);
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const commit = () => { if (text.trim() !== shown && !onSave(text)) setText(shown); };
+  return (
+    <input
+      inputMode="decimal" value={text} placeholder="入力" aria-label="順位P"
+      onChange={(e) => setText(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      style={{ ...input, width: 76, minHeight: 44, fontSize: 18, textAlign: "right", padding: "6px 10px", borderColor: shown === "" ? SC.orange : SC.border }}
+    />
   );
 }
