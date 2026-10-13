@@ -1,5 +1,5 @@
-// node --test で実行（npm test）
-import { test } from "node:test";
+// vitest で実行（npm test）
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { computeGame, computeDaily, checkTotal, autoAdjust, fmtPoint, CHOMBO_PENALTY } from "./scoring.js";
 import { searchPlayers, findSimilarPlayers, normalize } from "./playerSearch.js";
