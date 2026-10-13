@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:rules": "firebase emulators:exec --config docs/seiseki/firebase.emulator.json --only firestore,auth --project siten-fee7d \"node --test src/seiseki/rules.emulator.mjs\""
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "firebase": "^10.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
