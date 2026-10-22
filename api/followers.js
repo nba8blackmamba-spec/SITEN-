@@ -1,8 +1,4 @@
-// LINE 友だち一覧（スタッフとしてログインしている場合のみ）
-import { requireStaff } from "./_lib/server.js";
-
 export default async function handler(req, res) {
-  if (!(await requireStaff(req, res))) return;
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
   const listRes = await fetch("https://api.line.me/v2/bot/followers/ids", {
@@ -10,7 +6,12 @@ export default async function handler(req, res) {
   });
 
   if (!listRes.ok) {
-    return res.status(500).json({ error: "友だち一覧の取得に失敗しました", status: listRes.status });
+    const errText = await listRes.text();
+    return res.status(500).json({
+      error: "友だち一覧の取得に失敗しました",
+      status: listRes.status,
+      detail: errText
+    });
   }
 
   const listData = await listRes.json();

@@ -1,14 +1,16 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, doc, onSnapshot, setDoc, getDoc, query, orderBy, where } from "firebase/firestore";
-import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { auth, useStaffAuth, staffSignIn, staffSignOut, authErrorMessage, authedFetch } from "./seiseki/auth";
-import { toPublic, samePublic } from "./reserveLogic";
+import { collection, doc, onSnapshot, setDoc, getDoc, query, orderBy } from "firebase/firestore";
 import { AdminTableBoardPanel, HeaderBoardPreview } from "./TableBoard.jsx";
 
 const SITEN_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAflBMVEX88QMPYaoAAAD+/AKko1QFY7DepyoOYq777gZhZnL76gdLdZcOYq5zkWuRdFf8swkAf3+yoTkAAP9piIwAP78AefAANn/EkEG0tAC6xTy2xEkA///Dxkf3eBzedU85Xn8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD1YsZFAAAAIHRSTlP+/gAK/w3+XGP+nf+k//8OAv4B/wQFA/8D//8B/woP/3UTSsEAAAPaSURBVHjatZrZlpswDIZlbEiwIZAwWWc6ff+3rA1JMHiVUnTRTjvn6LN+yQuWoYhbD9z8xfd7KeFtUu730/9znnAA0d+W5ejccm2bHCEJRgxgvJcQtyeDAtDu+13DxMqjEL44wggIuy93jLG6WvlTrT8MjgJ8l5N7xo6zm58xAKXGf9wdRCAICAx/cs9UZY/9oQHDcDd/1k4URXHLBJz08JvJPztYLgalEyK0QcuUcGvKH4QL6N/D17bwowYhKm1CDMpbUUXRpQHW8LVdbQcPcQ1UkhVECqD9M8uWNXR0flibS1gBvpb+5wh+xNCKN64SWi7/xFsTYDX+3cL/nIOWwbAAMN+E8BAg6t+uIl0+s0QilAaHAAt91v7ZstzFO4Do8rQgQNT/cqV4DbuKjN8hQKh+3DISenqJY1VpfZSCXMIbcPb6t5Og2HA0UfzoBYkNUYJVrfBeH7z+rcXo2N6nxc6kWrTxbWLeheCdgMYLcPYDNUCGyWIFKD0J9qRZWy1yAHMaJkDflyxkK4dHyLOXSPAMoAkCnD0tz14iQVyg9Z6AsKdIIyAiED2Ep0gGcIkG8EEI3QsQDcDZFXAhgH8N+i8ijVkAM4lZyg70ECBRQh+JZEKA6Bz4VCQD6Iu0QmSReHGDLIWoIunpDOcchcgicQ55ClFFMkneZQKYINURZCpETIMs4JTtn5QGDmU+gJIGDjsEYHnYzksCDoAXSUKDAeBFwgIYPgsMadXWgHprAHpCowHYSkIDsJWEB7Dj1gCcSAQATiQKADUZSADMZGhIhOvWgOw8S9xyjZ/PZEBuCHvUlkkoJA492zQEjjm2EEKQmIMXZTqbg1e5pUbj8Z1tqJE+/JZbamSO7/2WGnENKM4b1lGR/RFIWy6mj8Ccz1hiEvgE+KKGcEinePoQ/yaGUCdrdAKQQ6hzbowM4BS7zlFkAAeecSHVtlSAfSEVvk5QQAbwzr4UDJWqiAEO8RLtcq41IQYQyesu62L24hfJ3FhTlgpZ3PgS8O2vpPHKmrDYuVfLgcvxO8CDkALP5XggDS2ERapw1/sBgggSamyDwk9Qj6lFhKghGWqxRGLQCJWbYrlsBybaXM/lQjj+gxnQEwAijbrs7e2QmmChVuMl7wwQEqhz2qVOs/Rr0SzFTWLp+ve0e8siLVOoj5nT7tX7zzkVhAgMn//JbLlf4kH4P8R9ww8+Guj716OBTP/yF/VoYMrE2Yv4e/Wqg3z2YDJxMYgmoz73WvmOE56eGMQ63Y5/M3ji05OxwXkyjDkOsX50Ah89nhn3oXJ6pbNrGnv4Ujv/Nb/pbgkH/wDdEDFg1IeT4wAAAABJRU5ErkJggg==";
 // ── 定数 ────────────────────────────────────────────────
 const SEATS = 4;
+const ADMINS = [
+  {pass:"3561212", name:"店長"},
+  {pass:"3561213", name:"スタッフA"},
+  {pass:"3561214", name:"スタッフB"},
+];
 const TABLES = [
   {id:1,label:"1卓"},{id:2,label:"2卓"},{id:3,label:"3卓"},
   {id:4,label:"4卓"},{id:5,label:"5卓"},{id:6,label:"6卓"},
@@ -139,69 +141,23 @@ export default function App() {
     } catch {}
   };
 
-  // ── ログイン状態 ──
-  // スタッフ: Firebase のメール/パスワードでログイン（seisekiStaff に登録された人だけ）
-  // お客さん: 自動で匿名ログイン。自分の予約・チャットだけ読める
-  const staffAuth = useStaffAuth();
-  const isStaff = staffAuth.status === "staff";
-  const [userUid, setUserUid] = useState(null);
-  useEffect(() => onAuthStateChanged(auth, (user) => {
-    if (user) setUserUid(user.uid);
-    else { setUserUid(null); signInAnonymously(auth).catch(e => console.error("匿名ログインエラー:", e)); }
-  }), []);
-
-  // ── 予約データ ──
-  // スタッフ: reservations（全件・個人情報あり）
-  // お客さん: rsvPublic（空き状況だけ・個人情報なし）＋ 自分の予約
-  const [staffRsv,  setStaffRsv]  = useState([]);
-  const [publicRsv, setPublicRsv] = useState([]);
-  const [ownRsv,    setOwnRsv]    = useState([]);
-  const [publicReady, setPublicReady] = useState(false);
+  const [rsvList,   setRsvListLocal]  = useState([]);
+  const [dbReady,   setDbReady]  = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "rsvPublic"), (snap) => {
-      setPublicRsv(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-      setPublicReady(true);
-    }, (err) => { console.error("空き状況の読み込みエラー:", err); setPublicReady(true); });
+    const q = query(collection(db, "reservations"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      setRsvListLocal(list);
+      setDbReady(true);
+    }, (err) => {
+      console.error("Firestore読み込みエラー:", err);
+      setDbReady(true);
+    });
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (!isStaff) { setStaffRsv([]); return; }
-    const q = query(collection(db, "reservations"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snap) => setStaffRsv(snap.docs.map(d => ({ ...d.data(), id: d.id }))),
-      (err) => console.error("予約の読み込みエラー:", err));
-  }, [isStaff]);
-
-  useEffect(() => {
-    if (!userUid) { setOwnRsv([]); return; }
-    const q = query(collection(db, "reservations"), where("ownerUid", "==", userUid));
-    return onSnapshot(q, (snap) => setOwnRsv(snap.docs.map(d => ({ ...d.data(), id: d.id }))),
-      (err) => console.error("自分の予約の読み込みエラー:", err));
-  }, [userUid]);
-
-  const rsvList = useMemo(() => {
-    if (isStaff) return staffRsv;
-    const own = new Map(ownRsv.map(r => [r.id, r]));
-    const merged = publicRsv.map(r => own.get(r.id) || r);
-    ownRsv.forEach(r => { if (!publicRsv.some(p => p.id === r.id)) merged.push(r); });
-    return merged.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  }, [isStaff, staffRsv, publicRsv, ownRsv]);
-  const dbReady = publicReady && staffAuth.status !== "loading";
-
-  // スタッフが開いている間、公開用の空き状況（rsvPublic）を予約データに合わせて更新する（過去の予約の移行も兼ねる）
-  useEffect(() => {
-    if (!isStaff) return;
-    const pub = new Map(publicRsv.map(r => [r.id, r]));
-    staffRsv.forEach(r => {
-      const p = toPublic(r);
-      if (!samePublic(pub.get(r.id), p)) setDoc(doc(db, "rsvPublic", r.id), p).catch(e => console.error("空き状況の保存エラー:", e));
-    });
-  }, [isStaff, staffRsv, publicRsv]);
-
-  // スタッフ画面からの予約の保存（お客さんの予約は /api/reserve を通す）
   const setRsvList = (updater) => {
-    if (!isStaff) return;
     const newList = typeof updater === "function" ? updater(rsvList) : updater;
     const prevMap = new Map(rsvList.map(r => [r.id, r]));
     newList.forEach(r => {
@@ -223,33 +179,13 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // イベント申込: スタッフは全件（個人情報あり）、お客さんは人数だけの公開用コピー
-  const [eventAppsPublic, setEventAppsPublic] = useState([]);
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "eventAppsPublic"), (snap) => {
-      setEventAppsPublic(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    }, (err) => console.error("イベント申込人数の読み込みエラー:", err));
-    return () => unsub();
-  }, []);
-  useEffect(() => {
-    if (!isStaff) { setEventApps([]); return; }
     const q = query(collection(db, "eventApplications"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, (snap) => {
       setEventApps(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     }, (err) => console.error("イベント申込読み込みエラー:", err));
-  }, [isStaff]);
-  // 過去の申込の公開用コピーを作る（スタッフが開いたときに自動で）
-  useEffect(() => {
-    if (!isStaff) return;
-    const pub = new Map(eventAppsPublic.map(a => [a.id, a]));
-    eventApps.forEach(a => {
-      const p = { id: a.id, eventId: a.eventId ?? null, occurrenceDate: a.occurrenceDate ?? null, people: Number(a.people) || 0, status: a.status ?? null };
-      const q = pub.get(a.id);
-      if (!q || Object.keys(p).some(k => (q[k] ?? null) !== p[k])) {
-        setDoc(doc(db, "eventAppsPublic", a.id), p).catch(e => console.error("申込人数の保存エラー:", e));
-      }
-    });
-  }, [isStaff, eventApps, eventAppsPublic]);
+    return () => unsub();
+  }, []);
 
   const saveEvent = (ev) => {
     const id = ev.id || uid();
@@ -259,10 +195,20 @@ export default function App() {
 
   const [toast,     setToast]    = useState(null);
   const [editing,   setEditing]  = useState(null);
-  const adminAuth = isStaff;
-  const adminName = staffAuth.name || staffAuth.user?.email?.split("@")[0] || "スタッフ";
-  // 以前の「ブラウザに保存するだけのログイン」の名残を消す
-  useEffect(() => { try { localStorage.removeItem("siten_admin_auth"); localStorage.removeItem("siten_admin_name"); } catch {} }, []);
+  const [adminAuth, setAdminAuthLocal]= useState(()=>{
+    try { return localStorage.getItem("siten_admin_auth")==="true"; } catch { return false; }
+  });
+  const [adminName, setAdminNameLocal]= useState(()=>{
+    try { return localStorage.getItem("siten_admin_name")||""; } catch { return ""; }
+  });
+  const setAdminAuth = (v) => {
+    setAdminAuthLocal(v);
+    try { localStorage.setItem("siten_admin_auth", v?"true":"false"); } catch {}
+  };
+  const setAdminName = (v) => {
+    setAdminNameLocal(v);
+    try { localStorage.setItem("siten_admin_name", v); } catch {}
+  };
 
   const [closedDays,setClosedDaysLocal]= useState([]);
   const [closedWeekdays,setClosedWeekdaysLocal]=useState([]);
@@ -281,7 +227,6 @@ export default function App() {
   }, []);
 
   const saveSettings = (partial) => {
-    if (!isStaff) return;
     setDoc(doc(db, "settings", "store"), {
       closedDays, closedWeekdays, cancelDeadlineHours, ...partial,
     }, { merge: true }).catch(e => console.error("設定保存エラー:", e));
@@ -302,7 +247,6 @@ export default function App() {
 
   // 0時を過ぎた予約を自動でfinished:trueにする（毎分チェック）
   useEffect(() => {
-    if (!isStaff) return;
     const autoFinish = () => {
       const now = new Date();
       const todayStr = fmt(now);
@@ -316,7 +260,7 @@ export default function App() {
     autoFinish();
     const timer = setInterval(autoFinish, 60000);
     return () => clearInterval(timer);
-  }, [rsvList, isStaff]);
+  }, [rsvList]);
 
   const isClosedDate = (date) => {
     if(closedDays.includes(date)) return true;
@@ -363,21 +307,12 @@ export default function App() {
 
   const notifyOwner = async (msg) => {
     try {
-      await authedFetch("/api/notify", { to: "U06ebc959d7d9eea50dc1c3f6254c0fc4", message: msg });
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "U06ebc959d7d9eea50dc1c3f6254c0fc4", message: msg }),
+      });
     } catch (e) { console.error("通知エラー:", e); }
-  };
-  // お客さんの予約操作はサーバー（/api/reserve）で行う
-  const callReserve = async (body) => {
-    try {
-      const res = await authedFetch("/api/reserve", body);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { flash(data.error || "処理に失敗しました", false); return null; }
-      return data;
-    } catch (e) {
-      console.error("予約APIエラー:", e);
-      flash("通信に失敗しました", false);
-      return null;
-    }
   };
   const lookupLineUserId = async (phone) => {
     const digits = (phone||"").replace(/[^\d]/g,"");
@@ -393,15 +328,6 @@ export default function App() {
       return false;
     }
     const isStaffBooking = rsv.createdBy==="staff";
-    if(!isStaffBooking){
-      if(!profile) setProfile({name:rsv.name,phone:rsv.phone});
-      const r = await callReserve({action:"create", booking:{...rsv, isBeginner:(rsv.tags||[]).includes("初心者")}});
-      if(!r) return false;
-      if(rsv.repeatWeeks>1) flash(`定期予約：確定${r.created}件${r.waitlisted>0?`／待ち${r.waitlisted}件`:""}${r.skippedDuplicate>0?`／重複のためスキップ${r.skippedDuplicate}件`:""} ✓`);
-      else flash(r.firstStatus==="confirmed"?"予約が確定しました ✓":"キャンセル待ちで登録しました");
-      setTab("list");
-      return true;
-    }
     if(!profile && !isStaffBooking) setProfile({name:rsv.name,phone:rsv.phone});
     const lineUserId = await lookupLineUserId(rsv.phone);
     const lineFields = lineUserId ? {lineUserId} : {};
@@ -432,14 +358,13 @@ export default function App() {
     }
     if(!isStaffBooking) setTab("list");
   };
-  const handleCancel = async (id) => {
-    if(await callReserve({action:"cancel", id})) flash("キャンセルしました");
+  const handleCancel = (id) => {
+    const rsv=rsvList.find(r=>r.id===id);
+    const next=rsvList.map(r=>r.id===id?{...r,status:"cancelled"}:r);
+    setRsvList(rsv?promoteWaitlist(next,rsv.date,rsv.time,rsv.tableId):next);
+    flash("キャンセルしました");
   };
-  const handleUpdate = async (rsv) => {
-    const r = await callReserve({action:"update", id:rsv.id, date:rsv.date, time:rsv.time, tableId:rsv.tableId, people:rsv.people, course:rsv.course});
-    if(r){ setEditing(null); flash("変更しました ✓"); }
-  };
-  const myRsv = rsvList.filter(r=>userUid&&r.ownerUid===userUid);
+  const handleUpdate = (rsv) => { setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r)); setEditing(null); flash("変更しました ✓"); };
   const adminCancel  = (id) => {
     const rsv=rsvList.find(r=>r.id===id);
     const next=rsvList.map(r=>r.id===id?{...r,status:"cancelled"}:r);
@@ -448,7 +373,7 @@ export default function App() {
   };
   const adminUpdate  = (rsv) => setRsvList(p=>p.map(r=>r.id===rsv.id?rsv:r));
 
-  const activeCount=myRsv.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)).length;
+  const activeCount=rsvList.filter(r=>r.status==="confirmed"&&!r.finished&&r.date>=fmt(TODAY)&&(profile?r.phone===profile.phone:false)).length;
   const ADMIN_TABS=[["today","今日"],["board","卓状況"],["list","予約一覧"],["newbooking","予約を代行入力"],["events","教室・大会"],["calendar","カレンダー"],["sales","売上"],["regulars","常連"],["chat","チャット"],["sitechat","サイトチャット"],["settings","設定"]];
 
   if (!dbReady) {
@@ -485,7 +410,7 @@ export default function App() {
                 <button key={k} onClick={()=>setAdminTab(k)} style={{padding:"7px 11px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:adminTab===k?C.gold:"transparent",color:adminTab===k?C.white:C.muted}}>{l}</button>
               ))}
               <button onClick={()=>setMode("customer")} style={{padding:"7px 11px",borderRadius:6,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:12,background:"transparent",color:C.muted,marginLeft:4}}>← 客側</button>
-              <button onClick={()=>{staffSignOut().catch(()=>{});setMode("customer");}} style={{padding:"7px 11px",borderRadius:6,border:`1px solid ${C.red}55`,cursor:"pointer",fontSize:12,background:"transparent",color:C.red,marginLeft:4}}>ログアウト</button>
+              <button onClick={()=>{setAdminAuth(false);setAdminName("");setMode("customer");}} style={{padding:"7px 11px",borderRadius:6,border:`1px solid ${C.red}55`,cursor:"pointer",fontSize:12,background:"transparent",color:C.red,marginLeft:4}}>ログアウト</button>
             </>
           )}
         </div>
@@ -496,9 +421,9 @@ export default function App() {
           <>
             {tab==="book"&&!profile&&<ProfileSetup onDone={setProfile}/>}
             {tab==="book"&&profile&&<BookForm profile={profile} onProfileReset={()=>setProfile(null)} onSubmit={handleBook} isOccupied={isOccupied} seatsLeft={seatsLeft} rsvList={rsvList} isClosedDate={isClosedDate} hasDuplicate={hasDuplicate}/>}
-            {tab==="list"&&profile&&<ReservationList rsvList={myRsv.filter(r=>!r.finished&&r.date>=fmt(TODAY))} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
+            {tab==="list"&&profile&&<ReservationList rsvList={rsvList.filter(r=>r.phone===profile.phone&&!r.finished&&r.date>=fmt(TODAY))} onCancel={handleCancel} onEdit={setEditing} waitlistRank={waitlistRank} seatsLeft={seatsLeft} canCancel={canCancel} cancelDeadlineHours={cancelDeadlineHours}/>}
             {tab==="list"&&!profile&&<ProfileSetup onDone={setProfile}/>}
-            {tab==="events"&&<EventsArea profile={profile} eventsList={eventsList} eventApps={eventAppsPublic} flash={flash}/>}
+            {tab==="events"&&<EventsArea profile={profile} eventsList={eventsList} eventApps={eventApps} flash={flash}/>}
           </>
         )}
         {mode==="admin"&&(
@@ -512,13 +437,13 @@ export default function App() {
                 cancelDeadlineHours={cancelDeadlineHours} setCancelDeadlineHours={setCancelDeadlineHours}
                 eventsList={eventsList} eventApps={eventApps} saveEvent={saveEvent}
               />
-            :<AdminLogin status={staffAuth.status}/>
+            :<AdminLogin onAuth={(name)=>{setAdminAuth(true);setAdminName(name);}}/>
         )}
       </main>
 
       {editing&&<EditModal rsv={editing} isOccupied={isOccupied} seatsLeft={seatsLeft} onSave={handleUpdate} onClose={()=>setEditing(null)}/>}
       {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.ok?C.green:C.red,color:"#fff",padding:"11px 22px",borderRadius:8,fontWeight:700,fontSize:14,zIndex:999,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",whiteSpace:"nowrap"}}>{toast.msg}</div>}
-      {mode==="customer"&&<CustomerSiteChat profile={profile} chatId={userUid}/>}
+      {mode==="customer"&&<CustomerSiteChat profile={profile}/>}
     </div>
   );
 }
@@ -545,33 +470,20 @@ function AdminArea({tab,rsvList,onCancel,onUpdate,waitlistRank,seatsLeft,adminNa
 }
 
 // ── 管理ログイン ─────────────────────────────────────────
-function AdminLogin({status}){
-  const [email,setEmail]=useState(""); const [pw,setPw]=useState("");
-  const [err,setErr]=useState(""); const [busy,setBusy]=useState(false);
-  const submit=async()=>{
-    if(!email||!pw||busy) return;
-    setBusy(true); setErr("");
-    try{ await staffSignIn(email,pw); setPw(""); }
-    catch(e){ setErr(authErrorMessage(e)); }
-    finally{ setBusy(false); }
+function AdminLogin({onAuth}){
+  const [pw,setPw]=useState(""); const [err,setErr]=useState("");
+  const submit=()=>{
+    const found=ADMINS.find(a=>a.pass===pw);
+    if(found){onAuth(found.name);}else{setErr("パスワードが違います");}
   };
   return(
     <div style={{maxWidth:360,margin:"60px auto"}}>
       <div style={tag}>店舗管理ログイン</div>
       <div style={crd}>
-        {status==="loading"&&<div style={{fontSize:12,color:C.muted}}>確認中...</div>}
-        {status==="notStaff"&&(
-          <div style={{color:C.red,fontSize:12,marginBottom:10}}>
-            ⚠ このアカウントはスタッフ登録されていません
-            <button onClick={()=>staffSignOut()} style={{marginLeft:8,fontSize:11,color:C.muted,background:"none",border:"none",textDecoration:"underline",cursor:"pointer"}}>ログアウト</button>
-          </div>
-        )}
-        <span style={lbl}>メールアドレス</span>
-        <input type="email" autoComplete="username" style={inp} value={email} onChange={e=>setEmail(e.target.value)}/>
-        <span style={{...lbl,marginTop:10}}>パスワード</span>
-        <input type="password" autoComplete="current-password" style={inp} placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+        <span style={lbl}>パスワード</span>
+        <input type="password" style={inp} placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
         {err&&<div style={{color:C.red,fontSize:12,marginTop:8}}>⚠ {err}</div>}
-        <button style={{...btn("primary"),marginTop:14}} onClick={submit} disabled={busy}>{busy?"ログイン中...":"ログイン"}</button>
+        <button style={{...btn("primary"),marginTop:14}} onClick={submit}>ログイン</button>
       </div>
     </div>
   );
@@ -1113,7 +1025,11 @@ function AdminChat(){
     if(!text||!selected||sending) return;
     setSending(true);
     try{
-      const res=await authedFetch("/api/chatReply",{userId:selected,message:text});
+      const res=await fetch("/api/chatReply",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({userId:selected,message:text}),
+      });
       if(!res.ok) throw new Error("送信に失敗しました");
       setInput("");
     }catch(e){
@@ -1238,7 +1154,11 @@ function AdminSiteChat(){
     setSending(true);
     try{
       const chat=chats.find(c=>c.id===selected);
-      const res=await authedFetch("/api/siteChatSend",{chatId:selected,name:chat?.name||"",text,from:"store"});
+      const res=await fetch("/api/siteChatSend",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({phone:selected,name:chat?.name||"",text,from:"store"}),
+      });
       if(!res.ok) throw new Error("送信に失敗しました");
       setInput("");
     }catch(e){
@@ -1270,7 +1190,7 @@ function AdminSiteChat(){
                 <div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"（名前未登録）"}</div>
                 {c.unreadByStore&&<span style={bdg("red")}>未読</span>}
               </div>
-              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{c.phone||c.id}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{c.id}</div>
               <div style={{fontSize:12,color:C.muted,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.lastMessage||""}</div>
               <div style={{fontSize:10,color:C.muted,marginTop:2}}>{fmtTime(c.lastMessageAt)}</div>
             </div>
@@ -1608,7 +1528,7 @@ function ProfileSetup({onDone}){
 }
 
 // ── 客側：サイト内チャット（フローティング） ─────────────
-function CustomerSiteChat({profile,chatId}){
+function CustomerSiteChat({profile}){
   const [open,setOpen]=useState(false);
   const [messages,setMessages]=useState([]);
   const [input,setInput]=useState("");
@@ -1616,31 +1536,29 @@ function CustomerSiteChat({profile,chatId}){
   const [unread,setUnread]=useState(false);
   const bottomRef=useRef(null);
   const phone=profile?.phone;
-  // チャットはこのブラウザ専用（匿名ログインのID）。電話番号を知っているだけでは他人のチャットは読めない
-  const cid=profile?chatId:null;
 
   useEffect(()=>{
-    if(!cid) return;
-    const unsub=onSnapshot(doc(db,"siteChats",cid),(snap)=>{
+    if(!phone) return;
+    const unsub=onSnapshot(doc(db,"siteChats",phone),(snap)=>{
       setUnread(snap.exists()&&!!snap.data().unreadByCustomer);
     },(err)=>console.error("サイトチャット未読取得エラー:",err));
     return ()=>unsub();
-  },[cid]);
+  },[phone]);
 
   useEffect(()=>{
-    if(!open||!cid){ setMessages([]); return; }
-    const q=query(collection(db,"siteChats",cid,"messages"),orderBy("createdAt","asc"));
+    if(!open||!phone){ setMessages([]); return; }
+    const q=query(collection(db,"siteChats",phone,"messages"),orderBy("createdAt","asc"));
     const unsub=onSnapshot(q,(snap)=>{
       setMessages(snap.docs.map(d=>({...d.data(),id:d.id})));
     },(err)=>console.error("サイトチャットメッセージ取得エラー:",err));
     return ()=>unsub();
-  },[open,cid]);
+  },[open,phone]);
 
   useEffect(()=>{
-    if(open&&cid&&unread){
-      setDoc(doc(db,"siteChats",cid),{unreadByCustomer:false},{merge:true}).catch(e=>console.error("既読更新エラー:",e));
+    if(open&&phone&&unread){
+      setDoc(doc(db,"siteChats",phone),{unreadByCustomer:false},{merge:true}).catch(e=>console.error("既読更新エラー:",e));
     }
-  },[open,cid,unread]);
+  },[open,phone,unread]);
 
   useEffect(()=>{
     bottomRef.current?.scrollIntoView({behavior:"smooth"});
@@ -1648,10 +1566,14 @@ function CustomerSiteChat({profile,chatId}){
 
   const send=async()=>{
     const text=input.trim();
-    if(!text||!phone||!cid||sending) return;
+    if(!text||!phone||sending) return;
     setSending(true);
     try{
-      const res=await authedFetch("/api/siteChatSend",{phone,name:profile.name,text,from:"customer"});
+      const res=await fetch("/api/siteChatSend",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({phone,name:profile.name,text,from:"customer"}),
+      });
       if(!res.ok) throw new Error("送信に失敗しました");
       setInput("");
     }catch(e){
@@ -1981,7 +1903,7 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
       </div>
 
       <div style={crd}>
-        <span style={lbl}>卓を選択 — {disp(date)} {timeSlots.length>0?`${time}〜`:"受付終了"}　（卓を長押しで予約状況を確認できます）</span>
+        <span style={lbl}>卓を選択 — {disp(date)} {timeSlots.length>0?`${time}〜`:"受付終了"}　（卓を長押しで予約者を確認できます）</span>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,opacity:(closed||timeSlots.length===0)?0.4:1,pointerEvents:(closed||timeSlots.length===0)?"none":"auto"}}>
           {TABLES.map(t=>{
             const left=seatsLeft(t.id,date,time); const occ=left<=0;
@@ -2014,9 +1936,7 @@ function BookForm({profile,onProfileReset,onSubmit,isOccupied,seatsLeft,rsvList,
                     style={{position:"absolute",bottom:"calc(100% + 6px)",left:"50%",transform:"translateX(-50%)",background:C.text,color:"#fff",borderRadius:8,padding:"8px 12px",fontSize:11,whiteSpace:"nowrap",zIndex:20,boxShadow:"0 4px 12px rgba(0,0,0,0.25)"}}
                   >
                     {guests.length>0
-                      ? (staffMode
-                          ? guests.map(g=><div key={g.id} style={{padding:"1px 0"}}>{g.name} 様（{g.people}名）</div>)
-                          : <div style={{padding:"1px 0"}}>{guests.length}組・{guests.reduce((s,g)=>s+(Number(g.people)||0),0)}名が予約済み</div>)
+                      ? guests.map(g=><div key={g.id} style={{padding:"1px 0"}}>{g.name} 様（{g.people}名）</div>)
                       : <div style={{opacity:0.7}}>予約者なし</div>
                     }
                     <button onClick={()=>setPeekTable(null)} style={{marginTop:4,fontSize:10,color:"#aaa",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>閉じる</button>

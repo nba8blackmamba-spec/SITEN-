@@ -14,17 +14,16 @@ import { db } from "../firebase";
 export const auth = getAuth(getApp());
 
 // status: "loading" | "signedOut" | "notStaff" | "staff"
-// 予約サイトのお客さんは匿名ログインしているので、匿名ユーザーは「未ログイン」扱いにする
 export function useStaffAuth() {
-  const [state, setState] = useState({ status: "loading", user: null, name: "" });
+  const [state, setState] = useState({ status: "loading", user: null });
   useEffect(() => onAuthStateChanged(auth, async (user) => {
-    if (!user || user.isAnonymous) return setState({ status: "signedOut", user: null, name: "" });
+    if (!user) return setState({ status: "signedOut", user: null });
     try {
       const snap = await getDoc(doc(db, "seisekiStaff", user.uid));
-      setState({ status: snap.exists() ? "staff" : "notStaff", user, name: snap.exists() ? (snap.data().name || "") : "" });
+      setState({ status: snap.exists() ? "staff" : "notStaff", user });
     } catch (e) {
       console.error("スタッフ確認エラー:", e);
-      setState({ status: "notStaff", user, name: "" });
+      setState({ status: "notStaff", user });
     }
   }), []);
   return state;
@@ -36,16 +35,6 @@ export async function staffSignIn(email, password) {
 }
 
 export const staffSignOut = () => signOut(auth);
-
-// 自分のサーバー（/api/...）を、ログインの証明（IDトークン）付きで呼ぶ
-export async function authedFetch(url, body) {
-  const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-  return fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify(body),
-  });
-}
 
 export const authErrorMessage = (e) => ({
   "auth/invalid-credential": "メールアドレスかパスワードが違います",
