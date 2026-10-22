@@ -3,19 +3,52 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ════════════════════════════════════════════════════
-    // 既存のコレクション（予約・チャット・卓状況など）
-    // ※ この部分は「今まで通り誰でも読み書きできる」前提で書いています。
-    //    今のルールが違う内容なら、この部分は今のルールをそのまま使ってください。
+    // 予約サイト（2026-10 セキュリティ修正）
+    // ・スタッフ = Firebase にメール/パスワードでログインし、seisekiStaff/{uid} に登録された人
+    // ・お客さん = 画面で自動の匿名ログイン。自分の予約・チャットだけ読める
+    // ・お客さんの書き込み（予約・チャット・イベント申込）はサーバー（/api/...）経由のみ
+    // ・誰でも読めるのは、個人情報を含まない「公開用コピー」と店の設定・卓状況だけ
     // ════════════════════════════════════════════════════
-    match /reservations/{id}       { allow read, write: if true; }
-    match /events/{id}             { allow read, write: if true; }
-    match /eventApplications/{id}  { allow read, write: if true; }
-    match /settings/{id}           { allow read, write: if true; }
-    match /phoneToLineUserId/{id}  { allow read, write: if true; }
-    match /lineUsers/{rest=**}     { allow read, write: if true; }
-    match /siteChats/{rest=**}     { allow read, write: if true; }
-    match /tables/{id}             { allow read, write: if true; }
-    match /boardMeta/{id}          { allow read, write: if true; }
+    function isStaff() { return isSeisekiStaff(); }
+
+    // 予約（名前・電話番号あり）: スタッフと、予約した本人だけ読める
+    match /reservations/{id} {
+      allow read: if isStaff() || (request.auth != null && resource.data.ownerUid == request.auth.uid);
+      allow write: if isStaff();
+    }
+    // 空き状況用の公開コピー（卓・日時・人数・状態だけ）
+    match /rsvPublic/{id} {
+      allow read: if true;
+      allow write: if isStaff()
+        && request.resource.data.keys().hasOnly(['id', 'tableId', 'date', 'time', 'people', 'status', 'finished', 'createdAt']);
+    }
+    // イベント申込（名前・電話番号あり）とその人数だけの公開コピー
+    match /eventApplications/{id} { allow read, write: if isStaff(); }
+    match /eventAppsPublic/{id} {
+      allow read: if true;
+      allow write: if isStaff()
+        && request.resource.data.keys().hasOnly(['id', 'eventId', 'occurrenceDate', 'people', 'status']);
+    }
+    // 店の情報: 誰でも読める／スタッフだけ書ける
+    match /events/{id}     { allow read: if true; allow write: if isStaff(); }
+    match /settings/{id}   { allow read: if true; allow write: if isStaff(); }
+    match /tables/{id}     { allow read: if true; allow write: if isStaff(); }
+    match /boardMeta/{id}  { allow read: if true; allow write: if isStaff(); }
+    // LINE 関係: スタッフだけ
+    match /phoneToLineUserId/{id} { allow read, write: if isStaff(); }
+    match /lineUsers/{rest=**}    { allow read, write: if isStaff(); }
+    // サイト内チャット: スタッフと、そのチャットの本人だけ。本人ができる書き込みは「既読にする」だけ
+    match /siteChats/{chatId} {
+      allow read: if isStaff() || (request.auth != null && resource.data.ownerUid == request.auth.uid);
+      allow write: if isStaff();
+      allow update: if request.auth != null && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadByCustomer']);
+      match /messages/{mid} {
+        allow read: if isStaff()
+          || (request.auth != null && get(/databases/$(database)/documents/siteChats/$(chatId)).data.ownerUid == request.auth.uid);
+        allow write: if isStaff();
+      }
+    }
 
     // ════════════════════════════════════════════════════
     // ▼▼▼ ここから 麻雀成績 ▼▼▼
@@ -47,7 +80,7 @@ service cloud.firestore {
 
     // スタッフの登録（Firebaseコンソールからだけ追加・削除する）
     match /seisekiStaff/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && (request.auth.uid == uid || isSeisekiStaff());
       allow write: if false;
     }
 

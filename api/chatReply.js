@@ -1,49 +1,28 @@
+// スタッフ画面から LINE のお客さんへ返信（スタッフとしてログインしている場合のみ）
+import { doc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { requireStaff, getServerDb, pushLine } from "./_lib/server.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
+  if (!(await requireStaff(req, res))) return;
 
-  const { userId, message } = req.body;
+  const { userId, message } = req.body || {};
   if (!userId || !message) {
     return res.status(400).json({ error: "userIdとmessageが必要です" });
   }
 
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-
   try {
-    const lineRes = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to: userId,
-        messages: [{ type: "text", text: message }],
-      }),
-    });
-    const lineData = await lineRes.json();
-    if (!lineRes.ok) {
+    const { ok, data: lineData } = await pushLine(userId, String(message));
+    if (!ok) {
       return res.status(500).json({ error: "LINE送信に失敗しました", detail: lineData });
     }
 
-    const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore, doc, setDoc, collection, addDoc, serverTimestamp } =
-      await import("firebase/firestore");
-
-    if (!getApps().length) {
-      initializeApp({
-        apiKey: process.env.FIREBASE_API_KEY,
-        authDomain: "siten-fee7d.firebaseapp.com",
-        projectId: "siten-fee7d",
-      });
-    }
-    const db = getFirestore();
-
+    const db = await getServerDb();
     await addDoc(collection(db, "lineUsers", userId, "messages"), {
       text: message,
       from: "store",
       createdAt: serverTimestamp(),
     });
-
     await setDoc(
       doc(db, "lineUsers", userId),
       {
