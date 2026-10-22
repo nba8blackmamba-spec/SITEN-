@@ -1,25 +1,18 @@
-import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, collection, getDocs } from "firebase/firestore";
-
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: "siten-fee7d.firebaseapp.com",
-  projectId: "siten-fee7d",
-};
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { getServerDb } from "./_lib/server.js";
 
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).end();
   }
 
-  if (!getApps().length) initializeApp(firebaseConfig);
-  const db = getFirestore();
+  const db = await getServerDb();
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
-  const snap = await getDocs(collection(db, "reservations"));
+  const snap = await getDocs(query(collection(db, "reservations"), where("date", "==", tomorrowStr)));
   const reservations = snap.docs.map(d => d.data());
   const targets = reservations.filter(r =>
     r.date === tomorrowStr && r.status === "confirmed" && !r.finished && r.lineUserId

@@ -1,3 +1,17 @@
+import crypto from "node:crypto";
+import { doc, getDoc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getServerDb } from "./_lib/server.js";
+
+// LINE から本当に届いたものか、署名（X-Line-Signature）で確かめる
+// 必要な環境変数: LINE_CHANNEL_SECRET（LINE Developers → チャネル基本設定 → チャネルシークレット）
+export function isValidLineSignature(rawBody, signature, secret) {
+  if (!secret || !signature) return false;
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(signature));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export const config = {
   api: { bodyParser: false },
 };
@@ -44,30 +58,16 @@ export default async function handler(req, res) {
     console.error("Lステップ転送エラー:", e);
   }
 
-  // ② こちら側でも、誰がメッセージを送ってきたかを記録する
+  // ② こちら側でも、誰がメッセージを送ってきたかを記録する（LINE からの正しい署名がある場合のみ）
+  if (!isValidLineSignature(rawBody, req.headers["x-line-signature"], process.env.LINE_CHANNEL_SECRET)) {
+    console.error("LINE署名が一致しないため記録しません（LINE_CHANNEL_SECRET を確認）");
+    return res.status(200).json({ ok: true });
+  }
   try {
     const body = JSON.parse(rawBody);
     const events = body.events || [];
 
-    const { initializeApp, getApps } = await import("firebase/app");
-    const {
-      getFirestore,
-      doc,
-      getDoc,
-      setDoc,
-      collection,
-      addDoc,
-      serverTimestamp,
-    } = await import("firebase/firestore");
-
-    if (!getApps().length) {
-      initializeApp({
-        apiKey: process.env.FIREBASE_API_KEY,
-        authDomain: "siten-fee7d.firebaseapp.com",
-        projectId: "siten-fee7d",
-      });
-    }
-    const db = getFirestore();
+    const db = await getServerDb();
     const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
     for (const event of events) {

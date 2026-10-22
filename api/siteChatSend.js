@@ -1,67 +1,54 @@
-const STORE_LINE_USER_ID = "U06ebc959d7d9eea50dc1c3f6254c0fc4";
-
-async function notifyStoreOnLine(name, text) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  const preview = text.length > 30 ? `${text.slice(0, 30)}…` : text;
-  try {
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to: STORE_LINE_USER_ID,
-        messages: [{ type: "text", text: `【サイトチャット】${name}様から新着メッセージ: ${preview}` }],
-      }),
-    });
-  } catch (e) {
-    console.error("サイトチャットLINE通知エラー:", e);
-  }
-}
+// サイト内チャットの送信
+// ・お客さん: ログイン証明（匿名ログイン）が必要。チャットはその人専用（siteChats/{uid}）
+// ・お店: スタッフとしてログインしている場合のみ。chatId で相手を指定
+import { doc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getServerDb, verifyRequestUser, verifyStaff, notifyStore } from "./_lib/server.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const { phone, name, text, from } = req.body || {};
-  if (!phone || !text || !from || (from !== "customer" && from !== "store")) {
-    return res.status(400).json({ error: "phone, text, from(customer/store)が必要です" });
+  const { chatId: bodyChatId, phone, name, text, from } = req.body || {};
+  const msg = String(text || "").trim();
+  if (!msg || msg.length > 1000 || (from !== "customer" && from !== "store")) {
+    return res.status(400).json({ error: "text(1000文字以内), from(customer/store)が必要です" });
+  }
+
+  let chatId;
+  if (from === "customer") {
+    const user = await verifyRequestUser(req);
+    if (!user) return res.status(401).json({ error: "ページを再読み込みしてからお試しください" });
+    chatId = user.uid;
+  } else {
+    const staff = await verifyStaff(req);
+    if (!staff) return res.status(401).json({ error: "スタッフとしてログインしてください" });
+    chatId = String(bodyChatId || "");
+    if (!chatId) return res.status(400).json({ error: "chatIdが必要です" });
   }
 
   try {
-    const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore, doc, setDoc, collection, addDoc, serverTimestamp } =
-      await import("firebase/firestore");
-
-    if (!getApps().length) {
-      initializeApp({
-        apiKey: process.env.FIREBASE_API_KEY,
-        authDomain: "siten-fee7d.firebaseapp.com",
-        projectId: "siten-fee7d",
-      });
-    }
-    const db = getFirestore();
-
-    await addDoc(collection(db, "siteChats", phone, "messages"), {
-      text,
+    const db = await getServerDb();
+    await addDoc(collection(db, "siteChats", chatId, "messages"), {
+      text: msg,
       from,
       createdAt: serverTimestamp(),
     });
 
-    await setDoc(
-      doc(db, "siteChats", phone),
-      {
-        name: name || "",
-        lastMessage: text,
-        lastMessageAt: serverTimestamp(),
-        unreadByStore: from === "customer",
-        unreadByCustomer: from === "store",
-      },
-      { merge: true }
-    );
+    const meta = {
+      lastMessage: msg,
+      lastMessageAt: serverTimestamp(),
+      unreadByStore: from === "customer",
+      unreadByCustomer: from === "store",
+    };
+    if (from === "customer") {
+      meta.ownerUid = chatId;
+      meta.name = String(name || "").slice(0, 40);
+      meta.phone = String(phone || "").slice(0, 20);
+    }
+    await setDoc(doc(db, "siteChats", chatId), meta, { merge: true });
 
     if (from === "customer") {
-      await notifyStoreOnLine(name || "お客様", text);
+      const preview = msg.length > 30 ? `${msg.slice(0, 30)}…` : msg;
+      await notifyStore(`【サイトチャット】${meta.name || "お客様"}様から新着メッセージ: ${preview}`);
     }
 
     return res.status(200).json({ ok: true });

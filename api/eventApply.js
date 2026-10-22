@@ -1,4 +1,6 @@
-const STORE_LINE_USER_ID = "U06ebc959d7d9eea50dc1c3f6254c0fc4";
+import { doc, getDoc, collection, getDocs, query, where, addDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { getServerDb, notifyStore } from "./_lib/server.js";
+
 const TYPE_LABEL = { class: "教室", tournament: "大会" };
 
 // 今日以降で直近の指定曜日を返す（毎週くり返しイベント用）
@@ -10,24 +12,8 @@ function nextOccurrenceDate(weekday, base = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-async function notifyStoreOnLine(typeLabel, title, name, people) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  try {
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to: STORE_LINE_USER_ID,
-        messages: [{ type: "text", text: `【${typeLabel}申込】${title}に${name}様(${people}名)が申し込みました` }],
-      }),
-    });
-  } catch (e) {
-    console.error("イベント申込LINE通知エラー:", e);
-  }
-}
+const notifyStoreOnLine = (typeLabel, title, name, people) =>
+  notifyStore(`【${typeLabel}申込】${title}に${name}様(${people}名)が申し込みました`);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
@@ -37,23 +23,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "eventId, name, phone, peopleが必要です" });
   }
   const peopleNum = Number(people);
-  if (!Number.isFinite(peopleNum) || peopleNum <= 0) {
+  if (!Number.isInteger(peopleNum) || peopleNum <= 0 || peopleNum > 20) {
     return res.status(400).json({ error: "人数が不正です" });
   }
 
   try {
-    const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore, doc, getDoc, collection, getDocs, query, where, addDoc, serverTimestamp } =
-      await import("firebase/firestore");
-
-    if (!getApps().length) {
-      initializeApp({
-        apiKey: process.env.FIREBASE_API_KEY,
-        authDomain: "siten-fee7d.firebaseapp.com",
-        projectId: "siten-fee7d",
-      });
-    }
-    const db = getFirestore();
+    const db = await getServerDb();
 
     const eventSnap = await getDoc(doc(db, "events", eventId));
     if (!eventSnap.exists()) {
@@ -85,15 +60,19 @@ export default async function handler(req, res) {
       }
     }
 
-    await addDoc(collection(db, "eventApplications"), {
+    const appRef = await addDoc(collection(db, "eventApplications"), {
       eventId,
-      name,
-      phone,
+      name: String(name).slice(0, 40),
+      phone: String(phone).slice(0, 20),
       people: peopleNum,
-      memo: memo || "",
+      memo: String(memo || "").slice(0, 500),
       status: "confirmed",
       occurrenceDate,
       createdAt: serverTimestamp(),
+    });
+    // 誰でも読める「申込人数」用のコピー（名前・電話番号は入れない）
+    await setDoc(doc(db, "eventAppsPublic", appRef.id), {
+      id: appRef.id, eventId, occurrenceDate, people: peopleNum, status: "confirmed",
     });
 
     const typeLabel = TYPE_LABEL[event.type] || "イベント";
